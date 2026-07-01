@@ -20,6 +20,10 @@ public:
 
     virtual void on_start() {}
 
+    // Periodic callback (~10 Hz) from the input loop; for time-based feedback
+    // (e.g. reverting a temporary LCD value). Same thread as the on_* handlers.
+    virtual void tick() {}
+
     // Normalized input. Fader/encoder-driven params are 0..1; encoder deltas ±1.
     virtual void on_fader(int /*strip*/, double /*value01*/) {}
     virtual void on_fader_touch(int /*strip*/, bool /*touched*/) {}

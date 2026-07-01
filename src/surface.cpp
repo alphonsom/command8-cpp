@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "surface.hpp"
 
+#include <poll.h>
+
+#include <cerrno>
+#include <chrono>
 #include <cstdio>
+#include <vector>
 
 namespace command8 {
 
@@ -51,6 +56,7 @@ bool Surface::open(const std::string& port_match) {
         return false;
     }
 
+    match_ = port_match;
     if (!find_device_port(port_match, dev_client_, dev_port_)) {
         std::fprintf(stderr, "command8: no port matching \"%s\"\n", port_match.c_str());
         close();
@@ -60,6 +66,7 @@ bool Surface::open(const std::string& port_match) {
     // device -> us (input) and us -> device (output)
     snd_seq_connect_from(seq_, my_port_, dev_client_, dev_port_);
     snd_seq_connect_to(seq_, my_port_, dev_client_, dev_port_);
+    snd_seq_nonblock(seq_, 1);   // non-blocking input; the run() loop polls
 
     if (snd_midi_event_new(256, &encoder_) < 0) {
         std::fprintf(stderr, "command8: cannot create midi encoder\n");
@@ -119,37 +126,59 @@ void Surface::keepalive_loop() {
     }
 }
 
+void Surface::dispatch_event(snd_seq_event_t* ev) {
+    Event decoded = std::monostate{};
+    switch (ev->type) {
+        case SND_SEQ_EVENT_NOTEON:
+            decoded = decode_note_on(ev->data.note.note, ev->data.note.velocity);
+            break;
+        case SND_SEQ_EVENT_NOTEOFF:
+            decoded = decode_note_on(ev->data.note.note, 0);   // vel-0 = release
+            break;
+        case SND_SEQ_EVENT_CONTROLLER:
+            decoded = decode_cc(static_cast<uint8_t>(ev->data.control.param),
+                                static_cast<uint8_t>(ev->data.control.value));
+            break;
+        default:
+            return;
+    }
+    if (std::holds_alternative<HeartbeatEvent>(decoded)) return;   // filter
+    if (std::holds_alternative<std::monostate>(decoded)) return;
+    if (cb_) cb_(decoded);
+}
+
+bool Surface::device_present() {
+    int c, p;
+    return seq_ && find_device_port(match_, c, p);
+}
+
 void Surface::run() {
     if (!seq_) return;
     running_ = true;
-    while (running_) {
-        snd_seq_event_t* ev = nullptr;
-        const int r = snd_seq_event_input(seq_, &ev);
-        if (r < 0) {
-            if (r == -EAGAIN || r == -ENOSPC) continue;
-            break;
-        }
-        if (!ev) continue;
 
-        Event decoded = std::monostate{};
-        switch (ev->type) {
-            case SND_SEQ_EVENT_NOTEON:
-                decoded = decode_note_on(ev->data.note.note, ev->data.note.velocity);
-                break;
-            case SND_SEQ_EVENT_NOTEOFF:
-                // some stacks map vel-0 note-on to note-off; treat as release
-                decoded = decode_note_on(ev->data.note.note, 0);
-                break;
-            case SND_SEQ_EVENT_CONTROLLER:
-                decoded = decode_cc(static_cast<uint8_t>(ev->data.control.param),
-                                    static_cast<uint8_t>(ev->data.control.value));
-                break;
-            default:
-                break;
+    const int npfd = snd_seq_poll_descriptors_count(seq_, POLLIN);
+    std::vector<pollfd> pfds(npfd > 0 ? npfd : 1);
+    auto last_check = std::chrono::steady_clock::now();
+
+    while (running_) {
+        snd_seq_poll_descriptors(seq_, pfds.data(), pfds.size(), POLLIN);
+        const int r = poll(pfds.data(), pfds.size(), 100);   // 100 ms slice
+        if (r < 0) { if (errno == EINTR) continue; break; }
+        if (r > 0) {
+            snd_seq_event_t* ev = nullptr;
+            while (running_ && snd_seq_event_input(seq_, &ev) >= 0) {
+                if (ev) dispatch_event(ev);
+            }
         }
-        if (std::holds_alternative<HeartbeatEvent>(decoded)) continue;   // filter
-        if (std::holds_alternative<std::monostate>(decoded)) continue;
-        if (cb_) cb_(decoded);
+        if (tick_cb_) tick_cb_();
+        const auto now = std::chrono::steady_clock::now();
+        if (now - last_check > std::chrono::milliseconds(500)) {
+            last_check = now;
+            if (!device_present()) {
+                std::fprintf(stderr, "command8: device removed\n");
+                running_ = false;
+            }
+        }
     }
 }
 

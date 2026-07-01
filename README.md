@@ -41,7 +41,18 @@ Requires a C++17 compiler, CMake ≥ 3.16, and `libasound2-dev`.
 ```sh
 cmake -B build
 cmake --build build
-./build/command8-monitor      # needs the device + the snd-usb-audio quirk loaded
+ctest --test-dir build                 # protocol decode/encode unit tests
+./build/command8-monitor               # loopback demo (needs the device + quirk)
+./build/command8-reaper                # Reaper OSC bridge (waits for the device)
+```
+
+Run `command8-reaper` as a **systemd user service** (self-heals on unplug/replug):
+
+```sh
+mkdir -p ~/.config/systemd/user
+cp systemd/command8-reaper.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now command8-reaper
 ```
 
 ## Status
@@ -55,9 +66,10 @@ reverse-engineering evidence live in `command8-linux/docs/PROTOCOL.md`.
 
 - [x] Normalized value/event abstraction above the raw protocol.
 - [x] Pluggable host Backend interface + Feedback handle.
-- [ ] Port the Reaper profile as a Backend front-end (encoder modes, LCD grid, …).
-- [ ] systemd user service; hotplug (re-open on device arrival).
-- [ ] Unit tests for `protocol` (decode/encode round-trips).
+- [x] Reaper Backend front-end (encoder modes, Flip, nav, LCD grid, actions,
+      ring-on-knob-turn, Channel-Data fader flash) — hardware-validated.
+- [x] systemd user service; hotplug (waits for the device, re-opens on replug).
+- [x] Unit tests for `protocol` (decode/encode round-trips, via CTest).
 
 ## License
 

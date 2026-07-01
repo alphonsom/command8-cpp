@@ -11,6 +11,7 @@
 #include <lo/lo.h>
 
 #include <array>
+#include <chrono>
 #include <mutex>
 #include <set>
 #include <string>
@@ -27,12 +28,17 @@ public:
     ~ReaperBackend() override;
 
     void on_start() override;
+    void tick() override;
     void on_fader(int strip, double value01) override;
     void on_encoder(int strip, int delta) override;
     void on_select(int strip, bool pressed) override;
     void on_mute(int strip, bool pressed) override;
     void on_solo(int strip, bool pressed) override;
     void on_button(uint8_t note, uint8_t subid, bool pressed) override;
+
+    // Stop the OSC receive thread while the Feedback handle is still valid
+    // (call before the owning Controller/Feedback is destroyed).
+    void stop();
 
 private:
     enum class Enc { Pan, Send, Insert, EQ, Dyn };
@@ -86,6 +92,11 @@ private:
     std::array<std::string, 8> names_, fxname_;
     std::set<int> selected_, recarm_;
     std::set<std::string> held_mods_;
+
+    // Channel-Data: a moved fader briefly shows its level, then reverts to name.
+    static constexpr std::chrono::milliseconds FLASH_MS{1200};
+    std::array<bool, 8> flash_pending_{};
+    std::array<std::chrono::steady_clock::time_point, 8> flash_deadline_{};
 };
 
 }  // namespace command8

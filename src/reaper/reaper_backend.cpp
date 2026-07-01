@@ -130,8 +130,12 @@ ReaperBackend::ReaperBackend(std::string host, std::string send_port,
     }
 }
 
+void ReaperBackend::stop() {
+    if (rx_) { lo_server_thread_free(rx_); rx_ = nullptr; }   // joins the recv thread
+}
+
 ReaperBackend::~ReaperBackend() {
-    if (rx_) { lo_server_thread_free(rx_); rx_ = nullptr; }
+    stop();
     if (tx_) { lo_address_free(tx_); tx_ = nullptr; }
 }
 
@@ -278,7 +282,26 @@ void ReaperBackend::on_fader(int strip, double v) {
     } else {
         vol_[strip] = v;
         send_f("/track/" + n + "/volume", static_cast<float>(v));
-        if (!is_fx() && disp_hold_ && fb_) fb_->lcd_channel(strip, fmt_pct(v));
+        if (!is_fx() && fb_) {
+            fb_->lcd_channel(strip, fmt_pct(v));   // Channel-Data: show the level
+            if (disp_hold_) {                       // held: persistent, no revert
+                flash_pending_[strip] = false;
+            } else {                                // else: revert to name shortly
+                flash_pending_[strip] = true;
+                flash_deadline_[strip] = std::chrono::steady_clock::now() + FLASH_MS;
+            }
+        }
+    }
+}
+
+void ReaperBackend::tick() {
+    std::lock_guard<std::mutex> lk(m_);
+    if (!fb_) return;
+    const auto now = std::chrono::steady_clock::now();
+    for (int s = 0; s < 8; ++s) {
+        if (!flash_pending_[s] || now < flash_deadline_[s]) continue;
+        flash_pending_[s] = false;
+        if (!is_fx() && !disp_hold_) fb_->lcd_channel(s, names_[s]);   // revert
     }
 }
 

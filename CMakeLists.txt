@@ -36,3 +36,10 @@ if(LIBLO_FOUND)
 else()
   message(STATUS "liblo not found - skipping command8-reaper")
 endif()
+
+# --- tests (CTest) ---
+enable_testing()
+add_executable(test_protocol tests/test_protocol.cpp)
+target_link_libraries(test_protocol PRIVATE command8)
+target_compile_options(test_protocol PRIVATE -Wall -Wextra)
+add_test(NAME protocol COMMAND test_protocol)
