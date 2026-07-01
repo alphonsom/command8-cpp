@@ -23,3 +23,16 @@ target_compile_options(command8 PRIVATE -Wall -Wextra)
 add_executable(command8-monitor src/main.cpp)
 target_link_libraries(command8-monitor PRIVATE command8)
 target_compile_options(command8-monitor PRIVATE -Wall -Wextra)
+
+# Reaper front-end (OSC via liblo). Optional: only built if liblo is present.
+pkg_check_modules(LIBLO liblo)
+if(LIBLO_FOUND)
+  add_executable(command8-reaper
+    src/reaper/reaper_main.cpp
+    src/reaper/reaper_backend.cpp)
+  target_include_directories(command8-reaper PRIVATE ${LIBLO_INCLUDE_DIRS})
+  target_link_libraries(command8-reaper PRIVATE command8 ${LIBLO_LIBRARIES})
+  target_compile_options(command8-reaper PRIVATE -Wall -Wextra)
+else()
+  message(STATUS "liblo not found - skipping command8-reaper")
+endif()
