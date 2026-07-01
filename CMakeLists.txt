@@ -13,7 +13,9 @@ pkg_check_modules(ALSA REQUIRED alsa)
 
 add_library(command8 STATIC
   src/protocol.cpp
-  src/surface.cpp)
+  src/surface.cpp
+  src/feedback.cpp
+  src/controller.cpp)
 target_include_directories(command8 PUBLIC src ${ALSA_INCLUDE_DIRS})
 target_link_libraries(command8 PUBLIC ${ALSA_LIBRARIES})
 target_compile_options(command8 PRIVATE -Wall -Wextra)

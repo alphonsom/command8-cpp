@@ -18,14 +18,21 @@ compiled program that talks to the device over ALSA.
 ## Layout
 
 ```
-src/protocol.{hpp,cpp}   native MIDI protocol: decode (input) + encode (feedback)
-src/surface.{hpp,cpp}    ALSA-seq I/O: device discovery, wake + keepalive, events
-src/main.cpp             command8-monitor: PoC that prints decoded input events
+src/protocol.{hpp,cpp}    native MIDI protocol: decode (input) + encode (feedback)
+src/surface.{hpp,cpp}     ALSA-seq I/O: device discovery, wake + keepalive, events
+src/feedback.{hpp,cpp}    normalized (0..1) feedback: faders/meters/rings/LEDs/LCD
+src/backend.hpp           Backend interface — host integrations subclass this
+src/controller.{hpp,cpp}  wires Surface -> Backend, normalizes events
+src/main.cpp              command8-monitor: demo Backend (loopback, no DAW)
 ```
 
-`libcommand8` (protocol + surface) is DAW-agnostic. Host integrations (a Reaper
-OSC bridge, a Mackie/HUI translator, a Bitwig backend, …) are meant to be built
-*on top* of this library as separate front-ends — none are included yet.
+`libcommand8` is DAW-agnostic. A **Backend** receives normalized input
+(`on_fader(strip, 0..1)`, `on_encoder(strip, ±1)`, `on_select`, …) and drives a
+**Feedback** handle (`meter`, `ring_dot`, `select_led`, `lcd_channel`, …) that
+hides the device bit-packing. Host integrations (a Reaper OSC bridge, a
+Mackie/HUI translator, a Bitwig backend, …) are Backends built on top — the demo
+in `main.cpp` is one (pure loopback: faders→meters, encoders→pan dot,
+select/mute/solo→LEDs).
 
 ## Build
 
@@ -46,10 +53,11 @@ reverse-engineering evidence live in `command8-linux/docs/PROTOCOL.md`.
 
 ## Roadmap
 
-- Value/event abstraction above the raw protocol (normalized 0..1 controls).
-- Pluggable host back-ends (start by porting the Reaper profile as a front-end).
-- systemd user service; hotplug (re-open on device arrival).
-- Unit tests for `protocol` (decode/encode round-trips).
+- [x] Normalized value/event abstraction above the raw protocol.
+- [x] Pluggable host Backend interface + Feedback handle.
+- [ ] Port the Reaper profile as a Backend front-end (encoder modes, LCD grid, …).
+- [ ] systemd user service; hotplug (re-open on device arrival).
+- [ ] Unit tests for `protocol` (decode/encode round-trips).
 
 ## License
 

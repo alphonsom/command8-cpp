@@ -1,61 +1,76 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Proof-of-concept: open the Command|8, do the handshake, and print decoded
-// input events. A brief LED "hello" confirms the output path works too.
+// Demo front-end built on the Controller/Backend/Feedback abstraction. It has no
+// DAW: it prints normalized input and drives loopback feedback so you can see the
+// engine working — faders move the meters, encoders move a pan dot, and
+// select/mute/solo toggle their LEDs. A real integration (Reaper, etc.) would be
+// a Backend just like this one.
+#include <array>
 #include <csignal>
 #include <cstdio>
 
-#include "surface.hpp"
+#include "controller.hpp"
 
 namespace {
 command8::Surface* g_surface = nullptr;
-
-void on_sigint(int) {
-    if (g_surface) g_surface->stop();
-}
-
-// helper for std::visit
-template <class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
-template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
+void on_sigint(int) { if (g_surface) g_surface->stop(); }
 }  // namespace
+
+class DemoBackend : public command8::Backend {
+public:
+    void on_start() override {
+        for (int s = 0; s < 8; ++s) {
+            fb_->lcd_channel(s, "Ch " + std::to_string(s + 1));
+            fb_->ring_dot(s, pan_[s]);
+        }
+        std::printf("Demo: faders->meters, encoders->pan dot, select/mute/solo toggle LEDs.\n");
+    }
+    void on_fader(int strip, double v) override {
+        fb_->meter(strip, v);
+        std::printf("fader   %d = %.2f\n", strip, v);
+    }
+    void on_encoder(int strip, int delta) override {
+        pan_[strip] = std::min(1.0, std::max(0.0, pan_[strip] + delta * 0.05));
+        fb_->ring_dot(strip, pan_[strip]);
+        std::printf("encoder %d -> pan %.2f\n", strip, pan_[strip]);
+    }
+    void on_select(int strip, bool pressed) override {
+        if (!pressed) return;
+        sel_[strip] = !sel_[strip];
+        fb_->select_led(strip, sel_[strip]);
+    }
+    void on_mute(int strip, bool pressed) override {
+        if (!pressed) return;
+        mute_[strip] = !mute_[strip];
+        fb_->mute_led(strip, mute_[strip]);
+    }
+    void on_solo(int strip, bool pressed) override {
+        if (!pressed) return;
+        solo_[strip] = !solo_[strip];
+        fb_->solo_led(strip, solo_[strip]);
+    }
+    void on_button(uint8_t note, uint8_t subid, bool pressed) override {
+        if (pressed) std::printf("button  note=%d subid=%d\n", note, subid);
+    }
+
+private:
+    std::array<double, 8> pan_{{0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5}};
+    std::array<bool, 8> sel_{}, mute_{}, solo_{};
+};
 
 int main() {
     command8::Surface surface;
     g_surface = &surface;
-
     if (!surface.open()) {
-        std::fprintf(stderr, "Could not open the Command|8 (is it connected and the "
-                             "snd-usb-audio quirk loaded?)\n");
+        std::fprintf(stderr, "Could not open the Command|8 (connected? snd-usb-audio "
+                             "quirk loaded?)\n");
         return 1;
     }
     std::signal(SIGINT, on_sigint);
 
-    surface.set_callback([](const command8::Event& ev) {
-        std::visit(overloaded{
-            [](const command8::HeartbeatEvent&) {},
-            [](const command8::ButtonEvent& b) {
-                std::printf("button   %-10s note=%2d subid=%2d %s\n",
-                            b.category.c_str(), b.note, b.subid,
-                            b.pressed ? "down" : "up");
-            },
-            [](const command8::FaderTouchEvent& f) {
-                std::printf("touch    fader=%d %s\n", f.fader, f.touched ? "on" : "off");
-            },
-            [](const command8::FaderMoveEvent& f) {
-                std::printf("fader    %d = %3d (10-bit %4d)\n", f.fader, f.value, f.value10);
-            },
-            [](const command8::EncoderEvent& e) {
-                std::printf("encoder  %d delta %+d\n", e.encoder, e.delta);
-            },
-            [](std::monostate) {},
-        }, ev);
-    });
-
-    // quick output test: sweep the green select LEDs on, then off
-    for (uint8_t s = 0; s < 8; ++s) surface.send(command8::button_led(command8::NOTE_SELECT_GREEN_LED, s, true));
-    for (uint8_t s = 0; s < 8; ++s) surface.send(command8::button_led(command8::NOTE_SELECT_GREEN_LED, s, false));
-
-    std::printf("Command|8 open. Move faders / turn encoders / press buttons. Ctrl-C to quit.\n");
-    surface.run();
+    DemoBackend backend;
+    command8::Controller controller(surface, backend);
+    std::printf("Command|8 open. Ctrl-C to quit.\n");
+    controller.run();
     surface.close();
     std::printf("\nbye\n");
     return 0;
