@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <sstream>
 #include <utility>
@@ -228,6 +229,8 @@ void ReaperBackend::update_recsel_led() {
 
 void ReaperBackend::set_enc_mode(Enc m) {
     enc_mode_ = m;
+    if (std::getenv("COMMAND8_DEBUG"))
+        std::fprintf(stderr, "[mode] -> %d (fx=%d)\n", static_cast<int>(m), is_fx());
     if (m == Enc::Insert) send_f("/device/fx/follows/lasttouched", 1.0f);
     else if (m == Enc::Dyn) {
         send_f("/device/fx/follows/device", 1.0f);
@@ -312,6 +315,9 @@ void ReaperBackend::on_solo(int strip, bool pressed) {
 void ReaperBackend::on_button(uint8_t note, uint8_t subid, bool pressed) {
     std::lock_guard<std::mutex> lk(m_);
     const std::string name = label_for(note, subid);
+    if (std::getenv("COMMAND8_DEBUG"))
+        std::fprintf(stderr, "[btn] (%u,%u) '%s' %s\n", note, subid,
+                     name.c_str(), pressed ? "down" : "up");
     if (name.empty()) return;
 
     if (name.rfind("mod_", 0) == 0) {
