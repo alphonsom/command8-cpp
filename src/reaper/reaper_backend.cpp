@@ -2,6 +2,7 @@
 #include "reaper/reaper_backend.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <map>
 #include <sstream>
@@ -34,22 +35,36 @@ const std::map<std::pair<int, int>, std::string> kButtons = {
     {{9, 10}, "mod_option"}, {{9, 14}, "STOP"},
 };
 
+// EQ mode: OSC address + 7-char LCD label per encoder (parallel arrays).
+const std::array<std::string, 8> kEqParams = {
+    "/fxeq/hipass/freq", "/fxeq/loshelf/gain", "/fxeq/band/1/freq",
+    "/fxeq/band/1/gain", "/fxeq/band/2/freq",  "/fxeq/band/2/gain",
+    "/fxeq/hishelf/gain", "/fxeq/lopass/freq"};
+const std::array<std::string, 8> kEqNames = {
+    "HP Freq", "LoShf G", "B1 Freq", "B1 Gain",
+    "B2 Freq", "B2 Gain", "HiShf G", "LP Freq"};
+
+// press -> Reaper action command id
+const std::map<std::string, int> kActions = {
+    {"RTZ", 40042}, {"Undo", 40029},  {"WMix", 40078},  {"MemLoc", 40157},
+    {"WEdit", 40153}, {"ESC", 41074}, {"MasterByp", 8}, {"WPlugin", 41749},
+    {"MstrFadrs", 40075}};
+
 std::string label_for(int note, int subid) {
     auto it = kButtons.find({note, subid});
     return it == kButtons.end() ? std::string() : it->second;
 }
 
 bool code_for(const std::string& name, int& note, int& subid) {
-    for (const auto& [k, v] : kButtons) {
+    for (const auto& [k, v] : kButtons)
         if (v == name) { note = k.first; subid = k.second; return true; }
-    }
     return false;
 }
 
 std::vector<std::string> split_path(const char* path) {
     std::vector<std::string> out;
-    std::string s(path), tok;
-    std::istringstream is(s);
+    std::string tok;
+    std::istringstream is(path);
     while (std::getline(is, tok, '/'))
         if (!tok.empty()) out.push_back(tok);
     return out;
@@ -66,9 +81,36 @@ float arg_as_float(const char* types, lo_arg** argv, int i) {
     }
 }
 
+double clamp01(double v) { return std::min(1.0, std::max(0.0, v)); }
+
 void osc_err(int num, const char* msg, const char* where) {
     std::fprintf(stderr, "osc error %d: %s (%s)\n", num, msg ? msg : "",
                  where ? where : "");
+}
+
+// NAV[arrow][mode] -> (address, behavior). behavior: 'h' hold, 'p' pulse, 't' tap.
+struct NavAct { std::string addr; char behavior; };
+NavAct nav_lookup(const std::string& arrow, int nav) {
+    // nav: 0 None, 1 Bank, 2 Nudge, 3 Zoom
+    if (arrow == "ScrlBack") {
+        if (nav == 3) return {"/zoom/x/-", 'p'};
+        if (nav == 1) return {"/device/track/bank/-", 't'};
+        if (nav == 2) return {"/device/track/-", 't'};
+        return {"/scroll/x/-", 'h'};
+    }
+    if (arrow == "ScrollFwd") {
+        if (nav == 3) return {"/zoom/x/+", 'p'};
+        if (nav == 1) return {"/device/track/bank/+", 't'};
+        if (nav == 2) return {"/device/track/+", 't'};
+        return {"/scroll/x/+", 'h'};
+    }
+    if (arrow == "ViewUP") {
+        if (nav == 3) return {"/zoom/y/+", 'p'};
+        return {"/scroll/y/-", 'h'};
+    }
+    // ViewDown
+    if (nav == 3) return {"/zoom/y/-", 'p'};
+    return {"/scroll/y/+", 'h'};
 }
 
 }  // namespace
@@ -78,7 +120,7 @@ ReaperBackend::ReaperBackend(std::string host, std::string send_port,
     : host_(std::move(host)),
       send_port_(std::move(send_port)),
       recv_port_(std::move(recv_port)) {
-    pan_.fill(0.5);
+    pan_.fill(0.5); vol_.fill(0.0); send_.fill(0.0); fxp_.fill(0.5); eq_.fill(0.5);
     tx_ = lo_address_new(host_.c_str(), send_port_.c_str());
     rx_ = lo_server_thread_new(recv_port_.c_str(), osc_err);
     if (rx_) {
@@ -95,6 +137,116 @@ ReaperBackend::~ReaperBackend() {
 void ReaperBackend::send_f(const std::string& path, float v) {
     if (tx_) lo_send(tx_, path.c_str(), "f", v);
 }
+void ReaperBackend::send_i(const std::string& path, int v) {
+    if (tx_) lo_send(tx_, path.c_str(), "i", v);
+}
+
+const char* ReaperBackend::enc_suffix() const {
+    return enc_mode_ == Enc::Send ? "send/1/volume" : "pan";
+}
+
+double ReaperBackend::active_value(int s) const {
+    switch (enc_mode_) {
+        case Enc::EQ:   return eq_[s];
+        case Enc::Insert:
+        case Enc::Dyn:  return fxp_[s];
+        case Enc::Send: return send_[s];
+        default:        return pan_[s];
+    }
+}
+
+void ReaperBackend::set_active(int s, double v) {
+    switch (enc_mode_) {
+        case Enc::EQ:   eq_[s] = v; break;
+        case Enc::Insert:
+        case Enc::Dyn:  fxp_[s] = v; break;
+        case Enc::Send: send_[s] = v; break;
+        default:        pan_[s] = v; break;
+    }
+}
+
+std::string ReaperBackend::fmt_pan(double v) const {
+    int p = static_cast<int>(std::lround((v - 0.5) * 200));
+    if (p == 0) return "C";
+    return (p < 0 ? "L" : "R") + std::to_string(std::abs(p));
+}
+std::string ReaperBackend::fmt_pct(double v) const {
+    return std::to_string(static_cast<int>(std::lround(v * 100))) + "%";
+}
+std::string ReaperBackend::fmt_active(int s) const {
+    return enc_mode_ == Enc::Pan ? fmt_pan(pan_[s]) : fmt_pct(active_value(s));
+}
+std::string ReaperBackend::param_name(int e) const {
+    if (enc_mode_ == Enc::EQ) return kEqNames[e];
+    if (enc_mode_ == Enc::Insert || enc_mode_ == Enc::Dyn) {
+        return fxname_[e].empty() ? ("Par " + std::to_string(e + 1)) : fxname_[e];
+    }
+    return "";
+}
+
+void ReaperBackend::value_cell(int s) {
+    if (!fb_) return;
+    if (is_fx()) fb_->lcd_channel(s, fmt_pct(active_value(s)));   // bottom row
+    else         fb_->lcd_status(s, fmt_active(s));               // top row
+}
+void ReaperBackend::label_cell(int s) {
+    if (!fb_) return;
+    if (is_fx()) fb_->lcd_status(s, param_name(s));               // top row
+    else         fb_->lcd_channel(s, names_[s]);                  // bottom row
+}
+void ReaperBackend::repaint() {
+    for (int s = 0; s < 8; ++s) { label_cell(s); value_cell(s); }
+}
+void ReaperBackend::active_ring(int e, double v) {
+    if (!fb_) return;
+    if (enc_mode_ == Enc::Pan) fb_->ring_dot(e, v);
+    else                       fb_->ring_fill(e, v);
+}
+
+void ReaperBackend::led(const std::string& name, bool on) {
+    int note, subid;
+    if (fb_ && code_for(name, note, subid))
+        fb_->strip_led(static_cast<uint8_t>(note), subid, on);
+}
+void ReaperBackend::enc_mode_leds() {
+    led("Pan", enc_mode_ == Enc::Pan);
+    led("Send", enc_mode_ == Enc::Send);
+    led("Insert", enc_mode_ == Enc::Insert);
+    led("EQ", enc_mode_ == Enc::EQ);
+    led("Dynamics", enc_mode_ == Enc::Dyn);
+}
+void ReaperBackend::nav_mode_leds() {
+    led("Bank", nav_mode_ == Nav::Bank);
+    led("Nudge", nav_mode_ == Nav::Nudge);
+    led("Zoom", nav_mode_ == Nav::Zoom);
+}
+void ReaperBackend::update_recsel_led() {
+    bool any = std::any_of(selected_.begin(), selected_.end(),
+                           [&](int s) { return recarm_.count(s) != 0; });
+    led("RecSel", any);
+}
+
+void ReaperBackend::set_enc_mode(Enc m) {
+    enc_mode_ = m;
+    if (m == Enc::Insert) send_f("/device/fx/follows/lasttouched", 1.0f);
+    else if (m == Enc::Dyn) {
+        send_f("/device/fx/follows/device", 1.0f);
+        send_i("/device/fx/select", DYN_FX_SLOT);
+    }
+    enc_mode_leds();
+    repaint();
+}
+
+void ReaperBackend::handle_nav(const std::string& arrow, bool pressed) {
+    const int nav = nav_mode_ == Nav::Bank ? 1
+                    : nav_mode_ == Nav::Nudge ? 2
+                    : nav_mode_ == Nav::Zoom ? 3 : 0;
+    NavAct a = nav_lookup(arrow, nav);
+    if (a.behavior == 'h') { send_f(a.addr, pressed ? 1.0f : 0.0f); return; }
+    if (!pressed) return;
+    if (a.behavior == 'p') { send_f(a.addr, 1.0f); send_f(a.addr, 0.0f); }
+    else                     send_f(a.addr, 1.0f);   // tap
+}
 
 void ReaperBackend::on_start() {
     std::printf("Reaper backend ready (OSC send %s:%s, recv :%s).\n",
@@ -102,60 +254,119 @@ void ReaperBackend::on_start() {
 }
 
 void ReaperBackend::on_fader(int strip, double v) {
-    send_f("/track/" + std::to_string(strip + 1) + "/volume", static_cast<float>(v));
+    std::lock_guard<std::mutex> lk(m_);
+    const std::string n = std::to_string(strip + 1);
+    if (flipped()) {
+        set_active(strip, v);
+        send_f("/track/" + n + "/" + enc_suffix(), static_cast<float>(v));
+        value_cell(strip);
+        active_ring(strip, v);
+    } else {
+        vol_[strip] = v;
+        send_f("/track/" + n + "/volume", static_cast<float>(v));
+        if (!is_fx() && disp_hold_ && fb_) fb_->lcd_channel(strip, fmt_pct(v));
+    }
 }
 
 void ReaperBackend::on_encoder(int strip, int delta) {
-    // Reaper has no relative pan over OSC: track absolute value and send it.
-    double nv = std::min(1.0, std::max(0.0, pan_[strip] + delta * PAN_STEP));
-    pan_[strip] = nv;
-    send_f("/track/" + std::to_string(strip + 1) + "/pan", static_cast<float>(nv));
-    if (fb_) fb_->ring_dot(strip, nv);   // Reaper won't echo our own change
+    std::lock_guard<std::mutex> lk(m_);
+    const double step = held_mods_.empty() ? PAN_STEP : PAN_STEP_FINE;
+    const std::string n = std::to_string(strip + 1);
+
+    if (enc_mode_ == Enc::Insert || enc_mode_ == Enc::Dyn) {
+        double nv = clamp01(fxp_[strip] + delta * step); fxp_[strip] = nv;
+        send_f("/fxparam/" + n + "/value", static_cast<float>(nv));
+        value_cell(strip); active_ring(strip, nv);
+        return;
+    }
+    if (enc_mode_ == Enc::EQ) {
+        double nv = clamp01(eq_[strip] + delta * step); eq_[strip] = nv;
+        send_f(kEqParams[strip], static_cast<float>(nv));
+        value_cell(strip); active_ring(strip, nv);
+        return;
+    }
+    if (flipped()) {   // encoder drives volume
+        double nv = clamp01(vol_[strip] + delta * step); vol_[strip] = nv;
+        send_f("/track/" + n + "/volume", static_cast<float>(nv));
+        return;
+    }
+    double nv = clamp01(active_value(strip) + delta * step);
+    set_active(strip, nv);
+    send_f("/track/" + n + "/" + enc_suffix(), static_cast<float>(nv));
+    value_cell(strip); active_ring(strip, nv);
 }
 
 void ReaperBackend::on_select(int strip, bool pressed) {
-    if (pressed) send_f("/track/" + std::to_string(strip + 1) + "/select/toggle", 1.0f);
+    if (pressed) { std::lock_guard<std::mutex> lk(m_);
+        send_f("/track/" + std::to_string(strip + 1) + "/select/toggle", 1.0f); }
 }
-
 void ReaperBackend::on_mute(int strip, bool pressed) {
-    if (pressed) send_f("/track/" + std::to_string(strip + 1) + "/mute/toggle", 1.0f);
+    if (pressed) { std::lock_guard<std::mutex> lk(m_);
+        send_f("/track/" + std::to_string(strip + 1) + "/mute/toggle", 1.0f); }
 }
-
 void ReaperBackend::on_solo(int strip, bool pressed) {
-    if (pressed) send_f("/track/" + std::to_string(strip + 1) + "/solo/toggle", 1.0f);
+    if (pressed) { std::lock_guard<std::mutex> lk(m_);
+        send_f("/track/" + std::to_string(strip + 1) + "/solo/toggle", 1.0f); }
 }
 
 void ReaperBackend::on_button(uint8_t note, uint8_t subid, bool pressed) {
+    std::lock_guard<std::mutex> lk(m_);
     const std::string name = label_for(note, subid);
-    if (name.empty() || name.rfind("mod_", 0) == 0) return;   // ignore/modifier
+    if (name.empty()) return;
 
-    if (name == "RecSel") {   // arm the selected track(s)
-        if (!pressed) return;
-        std::lock_guard<std::mutex> lk(m_);
-        for (int s : selected_)
-            send_f("/track/" + std::to_string(s + 1) + "/recarm/toggle", 1.0f);
+    if (name.rfind("mod_", 0) == 0) {
+        if (pressed) held_mods_.insert(name); else held_mods_.erase(name);
         return;
     }
-    if (!pressed) return;
-    if (name == "Play")          send_f("/play", 1.0f);
-    else if (name == "STOP")     send_f("/stop", 1.0f);
-    else if (name == "LoopPlay") send_f("/repeat", 1.0f);
-}
-
-void ReaperBackend::led_for(const std::string& name, bool on) {
-    int note, subid;
-    if (fb_ && code_for(name, note, subid))
-        fb_->strip_led(static_cast<uint8_t>(note), subid, on);
-}
-
-void ReaperBackend::update_recsel_led() {
-    bool any;
-    {
-        std::lock_guard<std::mutex> lk(m_);
-        any = std::any_of(selected_.begin(), selected_.end(),
-                          [&](int s) { return recarm_.count(s) != 0; });
+    if (name == "Flip") {
+        if (pressed) { flip_ = !flip_; led("Flip", flip_); }
+        return;
     }
-    led_for("RecSel", any);
+    if (name == "DispMode") {
+        disp_hold_ = pressed && !is_fx();
+        if (is_fx() || !fb_) return;
+        if (pressed) for (int s = 0; s < 8; ++s) fb_->lcd_channel(s, fmt_pct(vol_[s]));
+        else         for (int s = 0; s < 8; ++s) fb_->lcd_channel(s, names_[s]);
+        return;
+    }
+    if (name == "Pan")      { if (pressed) set_enc_mode(Enc::Pan);    return; }
+    if (name == "Send")     { if (pressed) set_enc_mode(Enc::Send);   return; }
+    if (name == "Insert")   { if (pressed) set_enc_mode(Enc::Insert); return; }
+    if (name == "EQ")       { if (pressed) set_enc_mode(Enc::EQ);     return; }
+    if (name == "Dynamics") { if (pressed) set_enc_mode(Enc::Dyn);    return; }
+
+    if (name == "RecSel") {
+        if (pressed)
+            for (int s : selected_)
+                send_f("/track/" + std::to_string(s + 1) + "/recarm/toggle", 1.0f);
+        return;
+    }
+    if (name == "REW") { send_f("/rewind", pressed ? 1.0f : 0.0f); return; }
+    if (name == "FWD") { send_f("/forward", pressed ? 1.0f : 0.0f); return; }
+
+    if (name == "Bank" || name == "Nudge" || name == "Zoom") {
+        if (pressed) {
+            Nav want = name == "Bank" ? Nav::Bank : name == "Nudge" ? Nav::Nudge : Nav::Zoom;
+            nav_mode_ = (nav_mode_ == want) ? Nav::None : want;
+            nav_mode_leds();
+        }
+        return;
+    }
+    if (name == "ScrlBack" || name == "ScrollFwd" || name == "ViewUP" || name == "ViewDown") {
+        handle_nav(name, pressed);
+        return;
+    }
+
+    if (!pressed) return;
+    if (name == "Play")          { send_f("/play", 1.0f); return; }
+    if (name == "STOP")          { send_f("/stop", 1.0f); return; }
+    if (name == "LoopPlay")      { send_f("/repeat", 1.0f); return; }
+    auto ai = kActions.find(name);
+    if (ai != kActions.end()) {
+        int cid = ai->second;
+        if (name == "Undo" && !held_mods_.empty()) cid = 40030;   // shift = redo
+        send_f("/action/" + std::to_string(cid), 1.0f);
+    }
 }
 
 int ReaperBackend::osc_cb(const char* path, const char* types, lo_arg** argv,
@@ -167,48 +378,91 @@ int ReaperBackend::osc_cb(const char* path, const char* types, lo_arg** argv,
 void ReaperBackend::handle(const char* path, const char* types, lo_arg** argv,
                            int argc) {
     if (!fb_) return;
+    std::lock_guard<std::mutex> lk(m_);
     const auto t = split_path(path);
     if (t.empty()) return;
 
+    // focused-FX param value (Insert/Dynamics): /fxparam/<i>/value
+    if (t.size() == 3 && t[0] == "fxparam" && t[2] == "value") {
+        int i = std::atoi(t[1].c_str()) - 1;
+        if (i < 0 || i > 7) return;
+        fxp_[i] = argc ? arg_as_float(types, argv, 0) : 0.f;
+        if (enc_mode_ == Enc::Insert || enc_mode_ == Enc::Dyn) {
+            fb_->ring_fill(i, fxp_[i]); value_cell(i);
+        }
+        return;
+    }
+    // focused-FX param name: /fxparam/<i>/name
+    if (t.size() == 3 && t[0] == "fxparam" && t[2] == "name") {
+        int i = std::atoi(t[1].c_str()) - 1;
+        if (i < 0 || i > 7) return;
+        fxname_[i] = (argc && types[0] == 's') ? &argv[0]->s : "";
+        if (enc_mode_ == Enc::Insert || enc_mode_ == Enc::Dyn) label_cell(i);
+        return;
+    }
+    // ReaEQ feedback: /fxeq/...
+    if (t[0] == "fxeq") {
+        for (int e = 0; e < 8; ++e) {
+            if (kEqParams[e] == path) {
+                eq_[e] = argc ? arg_as_float(types, argv, 0) : 0.f;
+                if (enc_mode_ == Enc::EQ) { fb_->ring_fill(e, eq_[e]); value_cell(e); }
+                return;
+            }
+        }
+        return;
+    }
+    // transport LEDs
+    if (t.size() == 1) {
+        float v = argc ? arg_as_float(types, argv, 0) : 0.f;
+        if (t[0] == "play")        led("Play", v != 0);
+        else if (t[0] == "stop")   led("STOP", v != 0);
+        else if (t[0] == "repeat") led("LoopPlay", v != 0);
+        return;
+    }
+    // per-track feedback
     if (t[0] == "track" && t.size() >= 3) {
-        const int strip = std::atoi(t[1].c_str()) - 1;
-        if (strip < 0 || strip > 7) return;
+        int s = std::atoi(t[1].c_str()) - 1;
+        if (s < 0 || s > 7) return;
         std::string suffix = t[2];
         for (size_t i = 3; i < t.size(); ++i) suffix += "/" + t[i];
 
         if (suffix == "name") {
-            std::string nm = (argc > 0 && types[0] == 's') ? &argv[0]->s : "";
-            fb_->lcd_channel(strip, nm);
+            names_[s] = (argc && types[0] == 's') ? &argv[0]->s : "";
+            if (!disp_hold_ && !is_fx()) fb_->lcd_channel(s, names_[s]);
             return;
         }
-        const float v = argc > 0 ? arg_as_float(types, argv, 0) : 0.0f;
-        if (suffix == "volume")      fb_->fader(strip, v);
-        else if (suffix == "pan")  { pan_[strip] = v; fb_->ring_dot(strip, v); }
-        else if (suffix == "mute")   fb_->mute_led(strip, v != 0);
-        else if (suffix == "solo")   fb_->solo_led(strip, v != 0);
-        else if (suffix == "select") {
-            { std::lock_guard<std::mutex> lk(m_);
-              if (v != 0) selected_.insert(strip); else selected_.erase(strip); }
-            fb_->select_led(strip, v != 0);
-            update_recsel_led();
+        float v = argc ? arg_as_float(types, argv, 0) : 0.f;
+        if (suffix == "volume") {
+            vol_[s] = v;
+            if (flipped()) fb_->ring_fill(s, v); else fb_->fader(s, v);
+            if (!is_fx() && disp_hold_) fb_->lcd_channel(s, fmt_pct(v));
+        } else if (suffix == "pan") {
+            pan_[s] = v;
+            if (enc_mode_ == Enc::Pan) {
+                if (flipped()) fb_->fader(s, v); else fb_->ring_dot(s, v);
+                value_cell(s);
+            }
+        } else if (suffix == "send/1/volume") {
+            send_[s] = v;
+            if (enc_mode_ == Enc::Send) {
+                if (flipped()) fb_->fader(s, v); else fb_->ring_fill(s, v);
+                value_cell(s);
+            }
+        } else if (suffix == "mute") {
+            fb_->mute_led(s, v != 0);
+        } else if (suffix == "solo") {
+            fb_->solo_led(s, v != 0);
+        } else if (suffix == "select") {
+            if (v != 0) selected_.insert(s); else selected_.erase(s);
+            fb_->select_led(s, v != 0); update_recsel_led();
         } else if (suffix == "recarm") {
-            { std::lock_guard<std::mutex> lk(m_);
-              if (v != 0) recarm_.insert(strip); else recarm_.erase(strip); }
-            fb_->recarm_led(strip, v != 0);
-            update_recsel_led();
+            if (v != 0) recarm_.insert(s); else recarm_.erase(s);
+            fb_->recarm_led(s, v != 0); update_recsel_led();
         } else if (suffix == "monitor") {
-            fb_->surface_led(strip, v != 0);
+            fb_->surface_led(s, v != 0);
         } else if (suffix == "vu") {
-            fb_->meter(strip, v);
+            fb_->meter(s, v);
         }
-        return;
-    }
-
-    if (t.size() == 1) {   // transport LEDs
-        const float v = argc > 0 ? arg_as_float(types, argv, 0) : 0.0f;
-        if (t[0] == "play")        led_for("Play", v != 0);
-        else if (t[0] == "stop")   led_for("STOP", v != 0);
-        else if (t[0] == "repeat") led_for("LoopPlay", v != 0);
     }
 }
 
