@@ -252,6 +252,17 @@ void ReaperBackend::handle_nav(const std::string& arrow, bool pressed) {
 }
 
 void ReaperBackend::on_start() {
+    // Cold-start defaults so the surface isn't blank before Reaper's first
+    // feedback burst (it only re-sends track names on connect/refresh). Any
+    // real feedback that arrived first is preserved (only empty names filled).
+    std::lock_guard<std::mutex> lk(m_);
+    for (int s = 0; s < 8; ++s)
+        if (names_[s].empty()) names_[s] = "Trk " + std::to_string(s + 1);
+    enc_mode_leds();
+    nav_mode_leds();
+    led("Flip", flip_);
+    repaint();
+    for (int s = 0; s < 8; ++s) active_ring(s, pan_[s]);   // centre dots
     std::printf("Reaper backend ready (OSC send %s:%s, recv :%s).\n",
                 host_.c_str(), send_port_.c_str(), recv_port_.c_str());
 }
