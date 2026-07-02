@@ -37,6 +37,13 @@ else()
   message(STATUS "liblo not found - skipping command8-reaper")
 endif()
 
+# Mackie Control (MCU) front-end (ALSA only; no extra deps).
+add_executable(command8-mackie
+  src/mackie/mackie_main.cpp
+  src/mackie/mackie_backend.cpp)
+target_link_libraries(command8-mackie PRIVATE command8)
+target_compile_options(command8-mackie PRIVATE -Wall -Wextra)
+
 # --- tests (CTest) ---
 enable_testing()
 add_executable(test_protocol tests/test_protocol.cpp)
