@@ -21,16 +21,30 @@ constexpr int N_PLAY = 0x5E, N_STOP = 0x5D, N_REC_BTN = 0x5F;
 constexpr int N_REW = 0x5B, N_FFWD = 0x5C, N_CYCLE = 0x56;
 constexpr int N_BANK_L = 0x2E, N_BANK_R = 0x2F;
 constexpr int VPOT_CC = 0x10, VPOT_LED_CC = 0x30;
+// V-pot assignment section
+constexpr int N_SEND = 0x29, N_PAN = 0x2A, N_PLUGIN = 0x2B, N_EQ = 0x2C, N_INST = 0x2D;
+// nav / view
+constexpr int N_FLIP = 0x32, N_GLOBAL = 0x33;
+constexpr int N_CUR_UP = 0x60, N_CUR_DN = 0x61, N_ZOOM = 0x64, N_SCRUB = 0x65;
 
-// Command|8 discrete (note,subid) -> MCU transport note. RecSel is special.
+// Command|8 discrete (note,subid) -> MCU note. RecSel is special.
 const std::map<std::pair<int, int>, int> kBtnToMcu = {
     {{10, 14}, N_PLAY}, {{9, 14}, N_STOP},   {{11, 14}, N_REC_BTN},
     {{3, 14}, N_CYCLE}, {{7, 14}, N_REW},    {{8, 14}, N_FFWD},
     {{5, 13}, N_BANK_L}, {{6, 13}, N_BANK_R},
+    // V-pot assignment (Pan/Send/Insert/EQ/Dynamics)
+    {{0, 10}, N_PAN}, {{1, 10}, N_SEND}, {{2, 10}, N_PLUGIN},
+    {{0, 11}, N_EQ},  {{1, 11}, N_INST},
+    // Flip + navigation (Bank->Global view, Nudge->Scrub, Zoom, arrows up/down)
+    {{0, 13}, N_FLIP}, {{2, 13}, N_GLOBAL}, {{3, 13}, N_SCRUB}, {{4, 13}, N_ZOOM},
+    {{7, 13}, N_CUR_UP}, {{8, 13}, N_CUR_DN},
 };
-// MCU transport note -> Command|8 LED (note, subid) for feedback.
+// MCU note -> Command|8 LED (note, subid) for feedback.
 const std::map<int, std::pair<int, int>> kMcuToLed = {
     {N_PLAY, {10, 14}}, {N_STOP, {9, 14}}, {N_REC_BTN, {11, 14}}, {N_CYCLE, {3, 14}},
+    {N_PAN, {0, 10}}, {N_SEND, {1, 10}}, {N_PLUGIN, {2, 10}}, {N_EQ, {0, 11}},
+    {N_INST, {1, 11}}, {N_FLIP, {0, 13}}, {N_GLOBAL, {2, 13}}, {N_SCRUB, {3, 13}},
+    {N_ZOOM, {4, 13}},
 };
 
 int find_port(snd_seq_t* seq, const std::string& match, int& client, int& port) {
