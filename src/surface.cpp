@@ -64,7 +64,16 @@ bool Surface::open(const std::string& port_match) {
     }
 
     // device -> us (input) and us -> device (output)
-    snd_seq_connect_from(seq_, my_port_, dev_client_, dev_port_);
+    const int rin = snd_seq_connect_from(seq_, my_port_, dev_client_, dev_port_);
+    if (rin < 0) {
+        std::fprintf(stderr,
+                     "command8: cannot subscribe to the device input (%s) - is "
+                     "another app (e.g. a DAW's MIDI input) holding the "
+                     "Command|8 MIDI port?\n",
+                     snd_strerror(rin));
+        close();
+        return false;
+    }
     snd_seq_connect_to(seq_, my_port_, dev_client_, dev_port_);
     snd_seq_nonblock(seq_, 1);   // non-blocking input; the run() loop polls
 
