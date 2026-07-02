@@ -24,27 +24,36 @@ constexpr int VPOT_CC = 0x10, VPOT_LED_CC = 0x30;
 // V-pot assignment section
 constexpr int N_SEND = 0x29, N_PAN = 0x2A, N_PLUGIN = 0x2B, N_EQ = 0x2C, N_INST = 0x2D;
 // nav / view
-constexpr int N_FLIP = 0x32, N_GLOBAL = 0x33;
-constexpr int N_CUR_UP = 0x60, N_CUR_DN = 0x61, N_ZOOM = 0x64, N_SCRUB = 0x65;
+constexpr int N_FLIP = 0x32;
+constexpr int N_CHAN_L = 0x30, N_CHAN_R = 0x31;   // move by 1 track
+constexpr int N_CUR_UP = 0x60, N_CUR_DN = 0x61, N_CUR_L = 0x62, N_CUR_R = 0x63;
+constexpr int N_ZOOM = 0x64;
 
-// Command|8 discrete (note,subid) -> MCU note. RecSel is special.
+// Navigation cluster (all at subid 13): Bank/Nudge/Zoom are a local mode radio
+// group; ScrlBack/ScrollFwd and ViewUP/Down translate per the active mode. These
+// are handled specially in on_button (not via kBtnToMcu below).
+constexpr int NAV_SUBID = 13;
+constexpr int BTN_BANK = 2, BTN_NUDGE = 3, BTN_ZOOM = 4;
+constexpr int BTN_SCRL_BACK = 5, BTN_SCRL_FWD = 6, BTN_VIEW_UP = 7, BTN_VIEW_DN = 8;
+enum NavMode { NAV_BANK = 0, NAV_NUDGE = 1, NAV_ZOOM = 2 };
+
+// Command|8 discrete (note,subid) -> MCU note. RecSel and the nav cluster are
+// special-cased in on_button.
 const std::map<std::pair<int, int>, int> kBtnToMcu = {
     {{10, 14}, N_PLAY}, {{9, 14}, N_STOP},   {{11, 14}, N_REC_BTN},
     {{3, 14}, N_CYCLE}, {{7, 14}, N_REW},    {{8, 14}, N_FFWD},
-    {{5, 13}, N_BANK_L}, {{6, 13}, N_BANK_R},
     // V-pot assignment (Pan/Send/Insert/EQ/Dynamics)
     {{0, 10}, N_PAN}, {{1, 10}, N_SEND}, {{2, 10}, N_PLUGIN},
     {{0, 11}, N_EQ},  {{1, 11}, N_INST},
-    // Flip + navigation (Bank->Global view, Nudge->Scrub, Zoom, arrows up/down)
-    {{0, 13}, N_FLIP}, {{2, 13}, N_GLOBAL}, {{3, 13}, N_SCRUB}, {{4, 13}, N_ZOOM},
-    {{7, 13}, N_CUR_UP}, {{8, 13}, N_CUR_DN},
+    // Flip (independent toggle, not part of the nav mode group)
+    {{0, 13}, N_FLIP},
 };
-// MCU note -> Command|8 LED (note, subid) for feedback.
+// MCU note -> Command|8 LED (note, subid) for feedback. The nav mode LEDs
+// (Bank/Nudge/Zoom) are driven locally, not from DAW feedback.
 const std::map<int, std::pair<int, int>> kMcuToLed = {
     {N_PLAY, {10, 14}}, {N_STOP, {9, 14}}, {N_REC_BTN, {11, 14}}, {N_CYCLE, {3, 14}},
     {N_PAN, {0, 10}}, {N_SEND, {1, 10}}, {N_PLUGIN, {2, 10}}, {N_EQ, {0, 11}},
-    {N_INST, {1, 11}}, {N_FLIP, {0, 13}}, {N_GLOBAL, {2, 13}}, {N_SCRUB, {3, 13}},
-    {N_ZOOM, {4, 13}},
+    {N_INST, {1, 11}}, {N_FLIP, {0, 13}},
 };
 
 int find_port(snd_seq_t* seq, const std::string& match, int& client, int& port) {
@@ -109,6 +118,8 @@ bool MackieBackend::open_port() {
 
 void MackieBackend::on_start() {
     lcd_.fill(' ');
+    nav_mode_ = NAV_BANK;
+    paint_nav_leds();     // light the default nav mode (Bank)
     if (seq_ && !running_) {
         running_ = true;
         rx_thread_ = std::thread(&MackieBackend::rx_loop, this);
@@ -167,8 +178,42 @@ void MackieBackend::on_button(uint8_t note, uint8_t subid, bool pressed) {
         for (int ch : selected_) send_note(N_REC + ch, pressed);
         return;
     }
+    if (subid == NAV_SUBID) {
+        switch (note) {
+            case BTN_BANK:  if (pressed) set_nav_mode(NAV_BANK);  return;
+            case BTN_NUDGE: if (pressed) set_nav_mode(NAV_NUDGE); return;
+            case BTN_ZOOM:  if (pressed) set_nav_mode(NAV_ZOOM);  return;
+            case BTN_SCRL_BACK:   // '<' : per-mode step left
+                send_note(nav_mode_ == NAV_BANK ? N_BANK_L
+                          : nav_mode_ == NAV_NUDGE ? N_CHAN_L : N_CUR_L, pressed);
+                return;
+            case BTN_SCRL_FWD:    // '>' : per-mode step right
+                send_note(nav_mode_ == NAV_BANK ? N_BANK_R
+                          : nav_mode_ == NAV_NUDGE ? N_CHAN_R : N_CUR_R, pressed);
+                return;
+            case BTN_VIEW_UP: send_note(N_CUR_UP, pressed); return;  // zoom in Zoom mode
+            case BTN_VIEW_DN: send_note(N_CUR_DN, pressed); return;
+            default: break;    // Flip (note 0), MstrFadrs (note 1): fall through
+        }
+    }
     auto it = kBtnToMcu.find({note, subid});
     if (it != kBtnToMcu.end()) send_note(it->second, pressed);
+}
+
+// Bank/Nudge/Zoom radio group. Only the active mode's LED lights; entering or
+// leaving Zoom toggles the DAW's Zoom modifier so the arrows zoom.
+void MackieBackend::set_nav_mode(int mode) {
+    if (mode == nav_mode_) return;
+    const bool was_zoom = (nav_mode_ == NAV_ZOOM), now_zoom = (mode == NAV_ZOOM);
+    nav_mode_ = mode;
+    if (now_zoom != was_zoom) { send_note(N_ZOOM, true); send_note(N_ZOOM, false); }
+    paint_nav_leds();
+}
+void MackieBackend::paint_nav_leds() {
+    if (!fb_) return;
+    fb_->strip_led(BTN_BANK,  NAV_SUBID, nav_mode_ == NAV_BANK);
+    fb_->strip_led(BTN_NUDGE, NAV_SUBID, nav_mode_ == NAV_NUDGE);
+    fb_->strip_led(BTN_ZOOM,  NAV_SUBID, nav_mode_ == NAV_ZOOM);
 }
 
 // --- MCU (DAW feedback) -> Command|8 --------------------------------------

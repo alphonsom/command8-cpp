@@ -47,8 +47,11 @@ private:
     void rx_loop();
     void handle_mcu(const snd_seq_event_t* ev);
     void lcd_sysex(const uint8_t* data, int len);
+    void set_nav_mode(int mode);   // Bank/Nudge/Zoom radio group
+    void paint_nav_leds();
 
     std::string match_;
+    int nav_mode_ = 0;               // 0=Bank,1=Nudge,2=Zoom (input thread only)
     snd_seq_t* seq_ = nullptr;
     int my_port_ = -1, dev_client_ = -1, dev_port_ = -1;
 
