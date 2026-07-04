@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "surface.hpp"
+#include "alsa/alsa_surface.hpp"
 
 #include <poll.h>
 
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
+#include <memory>
 #include <vector>
 
 namespace command8 {
 
-Surface::~Surface() { close(); }
+AlsaSurface::~AlsaSurface() { close(); }
 
-bool Surface::find_device_port(const std::string& match, int& client, int& port) const {
+bool AlsaSurface::find_device_port(const std::string& match, int& client, int& port) const {
     snd_seq_client_info_t* cinfo;
     snd_seq_port_info_t* pinfo;
     snd_seq_client_info_alloca(&cinfo);
@@ -38,7 +39,7 @@ bool Surface::find_device_port(const std::string& match, int& client, int& port)
     return false;
 }
 
-bool Surface::open(const std::string& port_match) {
+bool AlsaSurface::open(const std::string& port_match) {
     if (snd_seq_open(&seq_, "default", SND_SEQ_OPEN_DUPLEX, 0) < 0) {
         std::fprintf(stderr, "command8: cannot open ALSA sequencer\n");
         return false;
@@ -89,11 +90,11 @@ bool Surface::open(const std::string& port_match) {
     // wake the surface, then keep it online
     send(heartbeat());
     running_ = true;
-    keepalive_thread_ = std::thread(&Surface::keepalive_loop, this);
+    keepalive_thread_ = std::thread(&AlsaSurface::keepalive_loop, this);
     return true;
 }
 
-void Surface::close() {
+void AlsaSurface::close() {
     running_ = false;
     if (keepalive_thread_.joinable()) keepalive_thread_.join();
     if (encoder_) { snd_midi_event_free(encoder_); encoder_ = nullptr; }
@@ -101,7 +102,7 @@ void Surface::close() {
     my_port_ = dev_client_ = dev_port_ = -1;
 }
 
-void Surface::send(const std::vector<uint8_t>& bytes) {
+void AlsaSurface::send(const std::vector<uint8_t>& bytes) {
     if (!seq_ || !encoder_) return;
     std::lock_guard<std::mutex> lock(out_mutex_);
 
@@ -122,7 +123,7 @@ void Surface::send(const std::vector<uint8_t>& bytes) {
     }
 }
 
-void Surface::keepalive_loop() {
+void AlsaSurface::keepalive_loop() {
     // Timer-driven, never a reply: the device echoes host heartbeats, so replying
     // would create an echo loop. Sleep in small slices so stop() is responsive.
     auto next = std::chrono::steady_clock::now() + keepalive_interval;
@@ -135,7 +136,7 @@ void Surface::keepalive_loop() {
     }
 }
 
-void Surface::dispatch_event(snd_seq_event_t* ev) {
+void AlsaSurface::dispatch_event(snd_seq_event_t* ev) {
     Event decoded = std::monostate{};
     switch (ev->type) {
         case SND_SEQ_EVENT_NOTEON:
@@ -156,12 +157,12 @@ void Surface::dispatch_event(snd_seq_event_t* ev) {
     if (cb_) cb_(decoded);
 }
 
-bool Surface::device_present() {
+bool AlsaSurface::device_present() {
     int c, p;
     return seq_ && find_device_port(match_, c, p);
 }
 
-void Surface::run() {
+void AlsaSurface::run() {
     if (!seq_) return;
     running_ = true;
 
@@ -189,6 +190,36 @@ void Surface::run() {
             }
         }
     }
+}
+
+std::unique_ptr<Surface> make_surface() { return std::make_unique<AlsaSurface>(); }
+
+void print_midi_ports() {
+    snd_seq_t* seq = nullptr;
+    if (snd_seq_open(&seq, "default", SND_SEQ_OPEN_DUPLEX, 0) < 0) {
+        std::fprintf(stderr, "command8: cannot open ALSA sequencer\n");
+        return;
+    }
+    snd_seq_client_info_t* cinfo;
+    snd_seq_port_info_t* pinfo;
+    snd_seq_client_info_alloca(&cinfo);
+    snd_seq_port_info_alloca(&pinfo);
+    snd_seq_client_info_set_client(cinfo, -1);
+    std::fprintf(stderr, "MIDI ports:\n");
+    while (snd_seq_query_next_client(seq, cinfo) >= 0) {
+        const int c = snd_seq_client_info_get_client(cinfo);
+        snd_seq_port_info_set_client(pinfo, c);
+        snd_seq_port_info_set_port(pinfo, -1);
+        while (snd_seq_query_next_port(seq, pinfo) >= 0) {
+            const unsigned caps = snd_seq_port_info_get_capability(pinfo);
+            std::fprintf(stderr, "  %3d:%-2d %s%s%s\n", c,
+                         snd_seq_port_info_get_port(pinfo),
+                         snd_seq_port_info_get_name(pinfo),
+                         (caps & SND_SEQ_PORT_CAP_READ) ? " [in]" : "",
+                         (caps & SND_SEQ_PORT_CAP_WRITE) ? " [out]" : "");
+        }
+    }
+    snd_seq_close(seq);
 }
 
 }  // namespace command8

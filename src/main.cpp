@@ -4,9 +4,16 @@
 // engine working — faders move the meters, encoders move a pan dot, and
 // select/mute/solo toggle their LEDs. A real integration (Reaper, etc.) would be
 // a Backend just like this one.
+//
+//   ./command8-monitor [--port <name-substring>] [--list]
+//
+// --list prints the MIDI ports the backend can see and exits (use it to check
+// that the Command|8's input shows up at all).
 #include <array>
 #include <csignal>
 #include <cstdio>
+#include <cstring>
+#include <string>
 
 #include "controller.hpp"
 
@@ -57,21 +64,31 @@ private:
     std::array<bool, 8> sel_{}, mute_{}, solo_{};
 };
 
-int main() {
-    command8::Surface surface;
-    g_surface = &surface;
-    if (!surface.open()) {
-        std::fprintf(stderr, "Could not open the Command|8 (connected? snd-usb-audio "
-                             "quirk loaded?)\n");
+int main(int argc, char** argv) {
+    std::setvbuf(stdout, nullptr, _IONBF, 0);   // live output when piped/logged
+    std::string port_match = command8::kDefaultPortMatch;
+    for (int i = 1; i < argc; ++i) {
+        if (!std::strcmp(argv[i], "--list")) {
+            command8::print_midi_ports();
+            return 0;
+        }
+        if (!std::strcmp(argv[i], "--port") && i + 1 < argc) port_match = argv[++i];
+    }
+
+    auto surface = command8::make_surface();
+    g_surface = surface.get();
+    if (!surface->open(port_match)) {
+        std::fprintf(stderr, "Could not open the Command|8 (connected? on Linux: "
+                             "snd-usb-audio quirk loaded?)\n");
         return 1;
     }
     std::signal(SIGINT, on_sigint);
 
     DemoBackend backend;
-    command8::Controller controller(surface, backend);
+    command8::Controller controller(*surface, backend);
     std::printf("Command|8 open. Ctrl-C to quit.\n");
     controller.run();
-    surface.close();
+    surface->close();
     std::printf("\nbye\n");
     return 0;
 }

@@ -1,0 +1,15 @@
+{
+  "name": "command8",
+  "version-string": "0.1.0",
+  "dependencies": [
+    {
+      "name": "rtmidi",
+      "platform": "windows"
+    },
+    {
+      "name": "liblo",
+      "platform": "windows"
+    }
+  ],
+  "builtin-baseline": "d87340acc46bdeda386037b38aca30136e667e47"
+}

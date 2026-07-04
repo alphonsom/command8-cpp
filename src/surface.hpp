@@ -1,75 +1,74 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// ALSA-sequencer I/O for the Command|8: finds the device by port name, wakes it,
-// runs a timer-driven keepalive, decodes input into Events, and sends feedback.
+// Platform-neutral I/O interface for the Command|8: find the device by port
+// name, wake it, run a timer-driven keepalive, decode input into Events, and
+// send feedback. Concrete implementations: AlsaSurface (Linux, ALSA sequencer)
+// and RtMidiSurface (Windows, RtMidi/WinMM); make_surface() picks the platform
+// default.
 #pragma once
 
-#include <alsa/asoundlib.h>
-
-#include <atomic>
 #include <chrono>
 #include <functional>
-#include <mutex>
+#include <memory>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include "protocol.hpp"
 
 namespace command8 {
 
+// Device port-name substring. The Linux name comes from the snd-usb-audio
+// quirk. On Windows the surface is the device's first port, named exactly
+// "Command|8" (the later ports show up as "MIDIIN2/3 (Command|8)"); the bar
+// also keeps it from matching the "Command8 MCU" loopback endpoints.
+#ifdef _WIN32
+inline constexpr const char* kDefaultPortMatch = "Command|8";
+#else
+inline constexpr const char* kDefaultPortMatch = "Command|8 MIDI 1";
+#endif
+
 class Surface {
 public:
     using EventCallback = std::function<void(const Event&)>;
+    using TickCallback = std::function<void()>;
 
-    Surface() = default;
-    ~Surface();
-    Surface(const Surface&) = delete;
-    Surface& operator=(const Surface&) = delete;
+    virtual ~Surface() = default;
 
-    // Open the ALSA client, find the device port (name substring), subscribe,
-    // wake the surface and start the keepalive. Returns false on failure.
-    bool open(const std::string& port_match = "Command|8 MIDI 1");
-    void close();
+    // Open the MIDI backend, find the device port (name substring), wake the
+    // surface and start the keepalive. Returns false on failure.
+    virtual bool open(const std::string& port_match = kDefaultPortMatch) = 0;
+    virtual void close() = 0;
 
     void set_callback(EventCallback cb) { cb_ = std::move(cb); }
 
     // Optional periodic callback, invoked from the input loop (~10 Hz) on the
     // same thread as the event callback (so it can safely touch shared state).
-    using TickCallback = std::function<void()>;
     void set_tick(TickCallback cb) { tick_cb_ = std::move(cb); }
 
     // Send a raw MIDI byte sequence to the surface (from protocol::* encoders).
-    void send(const std::vector<uint8_t>& bytes);
+    virtual void send(const std::vector<uint8_t>& bytes) = 0;
 
     // Blocking input loop: decode incoming events and dispatch to the callback,
     // run the tick, and watch for device removal. Heartbeats are filtered out.
     // Returns when stop() is called or the device disappears.
-    void run();
-    void stop() { running_ = false; }
+    virtual void run() = 0;
+    virtual void stop() = 0;
 
     // Is the matched device port still present? (false after unplug.)
-    bool device_present();
+    virtual bool device_present() = 0;
 
     // Keepalive interval; the device drops output if not pinged periodically.
     std::chrono::milliseconds keepalive_interval{4000};
 
-private:
-    bool find_device_port(const std::string& match, int& client, int& port) const;
-    void keepalive_loop();
-    void dispatch_event(snd_seq_event_t* ev);
-
-    snd_seq_t* seq_ = nullptr;
-    int my_port_ = -1;
-    int dev_client_ = -1;
-    int dev_port_ = -1;
-    snd_midi_event_t* encoder_ = nullptr;   // raw-bytes -> seq-event encoder
-    std::string match_;                     // device port-name substring
-
+protected:
     EventCallback cb_;
     TickCallback tick_cb_;
-    std::thread keepalive_thread_;
-    std::atomic<bool> running_{false};
-    std::mutex out_mutex_;
 };
+
+// The platform's default Surface implementation (ALSA on Linux, RtMidi on
+// Windows).
+std::unique_ptr<Surface> make_surface();
+
+// Diagnostic: print the MIDI ports the backend can see (stderr).
+void print_midi_ports();
 
 }  // namespace command8

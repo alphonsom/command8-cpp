@@ -4,51 +4,89 @@ project(command8 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-if(NOT CMAKE_BUILD_TYPE)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(ALSA REQUIRED alsa)
+if(MSVC)
+  set(C8_WARNINGS /W4)
+else()
+  set(C8_WARNINGS -Wall -Wextra)
+endif()
 
+# Core library: protocol/feedback/controller are platform-neutral; the MIDI
+# transport (Surface + MidiPort) is ALSA on Linux and RtMidi on Windows.
 add_library(command8 STATIC
   src/protocol.cpp
-  src/surface.cpp
   src/feedback.cpp
   src/controller.cpp)
-target_include_directories(command8 PUBLIC src ${ALSA_INCLUDE_DIRS})
-target_link_libraries(command8 PUBLIC ${ALSA_LIBRARIES})
-target_compile_options(command8 PRIVATE -Wall -Wextra)
+target_include_directories(command8 PUBLIC src)
+target_compile_options(command8 PRIVATE ${C8_WARNINGS})
+
+if(WIN32)
+  find_package(RtMidi CONFIG REQUIRED)
+  target_sources(command8 PRIVATE
+    src/rtmidi/rtmidi_surface.cpp
+    src/rtmidi/rtmidi_midi_port.cpp)
+  target_link_libraries(command8 PUBLIC RtMidi::rtmidi)
+  target_compile_definitions(command8 PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN
+    _CRT_SECURE_NO_WARNINGS)
+else()
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(ALSA REQUIRED alsa)
+  find_package(Threads REQUIRED)
+  target_sources(command8 PRIVATE
+    src/alsa/alsa_surface.cpp
+    src/alsa/alsa_midi_port.cpp)
+  target_include_directories(command8 PUBLIC ${ALSA_INCLUDE_DIRS})
+  target_link_libraries(command8 PUBLIC ${ALSA_LIBRARIES} Threads::Threads)
+endif()
 
 add_executable(command8-monitor src/main.cpp)
 target_link_libraries(command8-monitor PRIVATE command8)
-target_compile_options(command8-monitor PRIVATE -Wall -Wextra)
+target_compile_options(command8-monitor PRIVATE ${C8_WARNINGS})
 
-# Reaper front-end (OSC via liblo). Optional: only built if liblo is present.
-pkg_check_modules(LIBLO liblo)
-if(LIBLO_FOUND)
+# Reaper front-end (OSC via liblo). Optional: only built if liblo is present
+# (vcpkg on Windows, pkg-config elsewhere).
+set(C8_LO_LIBS "")
+if(WIN32)
+  find_package(liblo CONFIG QUIET)
+  foreach(t liblo::liblo liblo::liblo_static liblo::lo liblo::lo_static)
+    if(NOT C8_LO_LIBS AND TARGET ${t})
+      set(C8_LO_LIBS ${t})
+    endif()
+  endforeach()
+else()
+  pkg_check_modules(LIBLO liblo)
+  if(LIBLO_FOUND)
+    set(C8_LO_LIBS ${LIBLO_LIBRARIES})
+  endif()
+endif()
+if(C8_LO_LIBS)
   add_executable(command8-reaper
     src/reaper/reaper_main.cpp
     src/reaper/reaper_backend.cpp)
-  target_include_directories(command8-reaper PRIVATE ${LIBLO_INCLUDE_DIRS})
-  target_link_libraries(command8-reaper PRIVATE command8 ${LIBLO_LIBRARIES})
-  target_compile_options(command8-reaper PRIVATE -Wall -Wextra)
+  if(NOT WIN32)
+    target_include_directories(command8-reaper PRIVATE ${LIBLO_INCLUDE_DIRS})
+  endif()
+  target_link_libraries(command8-reaper PRIVATE command8 ${C8_LO_LIBS})
+  target_compile_options(command8-reaper PRIVATE ${C8_WARNINGS})
 else()
   message(STATUS "liblo not found - skipping command8-reaper")
 endif()
 
-# Mackie Control (MCU) front-end (ALSA only; no extra deps).
+# Mackie Control (MCU) front-end (no extra deps beyond the MIDI backend).
 add_executable(command8-mackie
   src/mackie/mackie_main.cpp
   src/mackie/mackie_backend.cpp)
 target_link_libraries(command8-mackie PRIVATE command8)
-target_compile_options(command8-mackie PRIVATE -Wall -Wextra)
+target_compile_options(command8-mackie PRIVATE ${C8_WARNINGS})
 
 # --- tests (CTest) ---
 enable_testing()
 add_executable(test_protocol tests/test_protocol.cpp)
 target_link_libraries(test_protocol PRIVATE command8)
-target_compile_options(test_protocol PRIVATE -Wall -Wextra)
+target_compile_options(test_protocol PRIVATE ${C8_WARNINGS})
 add_test(NAME protocol COMMAND test_protocol)
 
 # --- install ---

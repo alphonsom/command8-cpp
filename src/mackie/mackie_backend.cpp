@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "mackie/mackie_backend.hpp"
 
-#include <poll.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -55,114 +53,49 @@ const std::map<int, std::pair<int, int>> kMcuToLed = {
     {N_PAN, {0, 10}}, {N_SEND, {1, 10}}, {N_PLUGIN, {2, 10}}, {N_EQ, {0, 11}},
     {N_INST, {1, 11}}, {N_FLIP, {0, 13}},
 };
-
-int find_port(snd_seq_t* seq, const std::string& match, int& client, int& port) {
-    snd_seq_client_info_t* ci;
-    snd_seq_port_info_t* pi;
-    snd_seq_client_info_alloca(&ci);
-    snd_seq_port_info_alloca(&pi);
-    snd_seq_client_info_set_client(ci, -1);
-    while (snd_seq_query_next_client(seq, ci) >= 0) {
-        const int c = snd_seq_client_info_get_client(ci);
-        snd_seq_port_info_set_client(pi, c);
-        snd_seq_port_info_set_port(pi, -1);
-        while (snd_seq_query_next_port(seq, pi) >= 0) {
-            const std::string name = snd_seq_port_info_get_name(pi);
-            const unsigned want = SND_SEQ_PORT_CAP_READ | SND_SEQ_PORT_CAP_WRITE;
-            if (name.find(match) != std::string::npos &&
-                (snd_seq_port_info_get_capability(pi) & want) == want) {
-                client = c;
-                port = snd_seq_port_info_get_port(pi);
-                return 0;
-            }
-        }
-    }
-    return -1;
-}
 }  // namespace
 
-MackieBackend::MackieBackend(std::string port_match) : match_(std::move(port_match)) {
-    open_port();
+MackieBackend::MackieBackend(std::string recv_match, std::string send_match)
+    : port_(make_midi_port()) {
+    if (!port_->open(recv_match, send_match)) port_.reset();
+    if (port_) port_->set_rx([this](const std::vector<uint8_t>& m) { handle_mcu(m); });
 }
 
-MackieBackend::~MackieBackend() {
-    stop();
-    if (seq_) { snd_seq_close(seq_); seq_ = nullptr; }
-}
-
-bool MackieBackend::open_port() {
-    if (snd_seq_open(&seq_, "default", SND_SEQ_OPEN_DUPLEX, 0) < 0) {
-        seq_ = nullptr;
-        return false;
-    }
-    snd_seq_set_client_name(seq_, "command8-mcu");
-    my_port_ = snd_seq_create_simple_port(
-        seq_, "MCU",
-        SND_SEQ_PORT_CAP_READ | SND_SEQ_PORT_CAP_WRITE |
-            SND_SEQ_PORT_CAP_SUBS_READ | SND_SEQ_PORT_CAP_SUBS_WRITE,
-        SND_SEQ_PORT_TYPE_MIDI_GENERIC | SND_SEQ_PORT_TYPE_APPLICATION);
-    if (my_port_ < 0 || find_port(seq_, match_, dev_client_, dev_port_) < 0) {
-        std::fprintf(stderr, "command8-mcu: no MIDI port matching %s (load "
-                     "snd-virmidi?)\n", match_.c_str());
-        snd_seq_close(seq_);
-        seq_ = nullptr;
-        return false;
-    }
-    snd_seq_connect_from(seq_, my_port_, dev_client_, dev_port_);
-    snd_seq_connect_to(seq_, my_port_, dev_client_, dev_port_);
-    snd_seq_nonblock(seq_, 1);
-    std::fprintf(stderr, "command8-mcu: MCU port %s (%d:%d)\n", match_.c_str(),
-                 dev_client_, dev_port_);
-    return true;
-}
+MackieBackend::~MackieBackend() { stop(); }
 
 void MackieBackend::on_start() {
     lcd_.fill(' ');
     nav_mode_ = NAV_BANK;
     paint_nav_leds();     // light the default nav mode (Bank)
-    if (seq_ && !running_) {
-        running_ = true;
-        rx_thread_ = std::thread(&MackieBackend::rx_loop, this);
-    }
+    if (port_) port_->start();
 }
 
 void MackieBackend::stop() {
-    running_ = false;
-    if (rx_thread_.joinable()) rx_thread_.join();
+    if (port_) port_->stop();
 }
 
 // --- send helpers ----------------------------------------------------------
-void MackieBackend::send_event(snd_seq_event_t* ev) {
-    if (!seq_) return;
-    std::lock_guard<std::mutex> lk(out_m_);
-    snd_seq_ev_set_source(ev, my_port_);
-    snd_seq_ev_set_subs(ev);
-    snd_seq_ev_set_direct(ev);
-    snd_seq_event_output_direct(seq_, ev);
-}
 void MackieBackend::send_note(int note, bool on) {
-    snd_seq_event_t ev;
-    snd_seq_ev_clear(&ev);
-    snd_seq_ev_set_noteon(&ev, 0, note, on ? 127 : 0);
-    send_event(&ev);
+    if (!port_) return;
+    port_->send({0x90, static_cast<uint8_t>(note & 0x7F),
+                 static_cast<uint8_t>(on ? 127 : 0)});
 }
 void MackieBackend::send_cc(int cc, int value) {
-    snd_seq_event_t ev;
-    snd_seq_ev_clear(&ev);
-    snd_seq_ev_set_controller(&ev, 0, cc, value);
-    send_event(&ev);
+    if (!port_) return;
+    port_->send({0xB0, static_cast<uint8_t>(cc & 0x7F),
+                 static_cast<uint8_t>(value & 0x7F)});
 }
 void MackieBackend::send_pitch(int channel, int value) {
-    snd_seq_event_t ev;
-    snd_seq_ev_clear(&ev);
-    snd_seq_ev_set_pitchbend(&ev, channel, value);   // -8192..8191
-    send_event(&ev);
+    if (!port_) return;
+    const int v = std::max(-8192, std::min(8191, value)) + 8192;   // 0..16383
+    port_->send({static_cast<uint8_t>(0xE0 | (channel & 0x0F)),
+                 static_cast<uint8_t>(v & 0x7F),
+                 static_cast<uint8_t>((v >> 7) & 0x7F)});
 }
 
 // --- Command|8 surface -> MCU ---------------------------------------------
 void MackieBackend::on_fader(int strip, double v) {
     int pitch = static_cast<int>(std::lround(v * 16383.0)) - 8192;
-    pitch = std::max(-8192, std::min(8191, pitch));
     send_pitch(strip & 7, pitch);
 }
 void MackieBackend::on_encoder(int strip, int delta) {
@@ -217,57 +150,52 @@ void MackieBackend::paint_nav_leds() {
 }
 
 // --- MCU (DAW feedback) -> Command|8 --------------------------------------
-void MackieBackend::rx_loop() {
-    const int npfd = snd_seq_poll_descriptors_count(seq_, POLLIN);
-    std::vector<pollfd> pfds(npfd > 0 ? npfd : 1);
-    while (running_) {
-        snd_seq_poll_descriptors(seq_, pfds.data(), pfds.size(), POLLIN);
-        if (poll(pfds.data(), pfds.size(), 100) <= 0) continue;
-        snd_seq_event_t* ev = nullptr;
-        while (running_ && snd_seq_event_input(seq_, &ev) >= 0) {
-            if (ev) handle_mcu(ev);
-        }
+void MackieBackend::handle_mcu(const std::vector<uint8_t>& m) {
+    if (!fb_ || m.empty()) return;
+    if (m[0] == 0xF0) {
+        lcd_sysex(m.data(), static_cast<int>(m.size()));
+        return;
     }
-}
-
-void MackieBackend::handle_mcu(const snd_seq_event_t* ev) {
-    if (!fb_) return;
-    switch (ev->type) {
-        case SND_SEQ_EVENT_PITCHBEND: {
-            int ch = ev->data.control.channel;
-            if (ch < 8)
-                fb_->fader(ch, (ev->data.control.value + 8192) / 16383.0);
+    const int type = m[0] & 0xF0, ch = m[0] & 0x0F;
+    switch (type) {
+        case 0xE0: {                                    // pitchbend = fader
+            if (m.size() < 3) break;
+            const int v = (m[2] << 7) | m[1];           // 0..16383
+            if (ch < 8) fb_->fader(ch, v / 16383.0);
             break;
         }
-        case SND_SEQ_EVENT_CHANPRESS: {                 // meters
-            int v = ev->data.control.value;
-            int ch = (v >> 4) & 7, level = v & 0x0F;
-            fb_->meter(ch, std::min(1.0, level / 12.0));
+        case 0xD0: {                                    // channel pressure = meters
+            if (m.size() < 2) break;
+            const int v = m[1];
+            const int strip = (v >> 4) & 7, level = v & 0x0F;
+            fb_->meter(strip, std::min(1.0, level / 12.0));
             break;
         }
-        case SND_SEQ_EVENT_CONTROLLER: {
-            int cc = ev->data.control.param;
+        case 0xB0: {
+            if (m.size() < 3) break;
+            const int cc = m[1];
             if (cc >= VPOT_LED_CC && cc <= VPOT_LED_CC + 7) {
-                int enc = cc - VPOT_LED_CC, val = ev->data.control.value;
-                int pos = val & 0x0F, mode = (val >> 4) & 0x03;
+                const int enc = cc - VPOT_LED_CC, val = m[2];
+                const int pos = val & 0x0F, mode = (val >> 4) & 0x03;
                 if (pos == 0) fb_->ring_fill(enc, 0.0);
                 else if (mode == 2) fb_->ring_fill(enc, pos / 11.0);      // wrap/fill
                 else fb_->ring_dot(enc, (pos - 1) / 10.0);               // single dot
             }
             break;
         }
-        case SND_SEQ_EVENT_NOTEON:
-        case SND_SEQ_EVENT_NOTEOFF: {
-            bool on = (ev->type == SND_SEQ_EVENT_NOTEON && ev->data.note.velocity > 0);
-            int n = ev->data.note.note;
+        case 0x90:
+        case 0x80: {
+            if (m.size() < 3) break;
+            const bool on = (type == 0x90 && m[2] > 0);
+            const int n = m[1];
             if (n >= N_REC && n <= N_REC + 7) fb_->recarm_led(n - N_REC, on);
             else if (n >= N_SOLO && n <= N_SOLO + 7) fb_->solo_led(n - N_SOLO, on);
             else if (n >= N_MUTE && n <= N_MUTE + 7) fb_->mute_led(n - N_MUTE, on);
             else if (n >= N_SELECT && n <= N_SELECT + 7) {
-                int ch = n - N_SELECT;
+                const int c = n - N_SELECT;
                 { std::lock_guard<std::mutex> lk(state_m_);
-                  if (on) selected_.insert(ch); else selected_.erase(ch); }
-                fb_->select_led(ch, on);
+                  if (on) selected_.insert(c); else selected_.erase(c); }
+                fb_->select_led(c, on);
             } else {
                 auto it = kMcuToLed.find(n);
                 if (it != kMcuToLed.end())
@@ -276,9 +204,6 @@ void MackieBackend::handle_mcu(const snd_seq_event_t* ev) {
             }
             break;
         }
-        case SND_SEQ_EVENT_SYSEX:
-            lcd_sysex(static_cast<const uint8_t*>(ev->data.ext.ptr), ev->data.ext.len);
-            break;
         default:
             break;
     }
