@@ -4,12 +4,15 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
 
 jobs:
   build:
     name: build + test + package
+    # Branches and PRs only; tag pushes are handled by the release job below.
+    if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,3 +46,45 @@ jobs:
             build/command8-*-Linux.deb
             build/command8-*-Linux.tar.gz
           if-no-files-found: error
+
+  release:
+    name: release on tag
+    # Runs only for pushed v* tags; builds with the version taken from the tag.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # to create the GitHub Release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake g++ pkg-config libasound2-dev liblo-dev lintian file
+
+      - name: Derive version from tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"   # v1.2.3 -> 1.2.3
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCOMMAND8_VERSION="$VERSION"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package (.deb + .tar.gz)
+        run: cmake --build build --target package
+
+      - name: Lint the .deb
+        run: lintian --fail-on error,warning build/command8-*-Linux.deb
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            build/command8-*-Linux.deb build/command8-*-Linux.tar.gz \
+            --title "$GITHUB_REF_NAME" --generate-notes

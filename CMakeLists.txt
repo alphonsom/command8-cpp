@@ -134,7 +134,9 @@ endif()
 
 # --- packaging (CPack: .deb + .tar.gz) ---
 set(CPACK_PACKAGE_NAME command8)
-set(CPACK_PACKAGE_VERSION "0.1.0")
+# Overridable from the release tag: cmake -B build -DCOMMAND8_VERSION=1.2.3
+set(COMMAND8_VERSION "0.1.0" CACHE STRING "Package version (x.y.z)")
+set(CPACK_PACKAGE_VERSION "${COMMAND8_VERSION}")
 set(CPACK_PACKAGE_CONTACT "Alphonso Mango <alphonso.mango@outlook.com>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
     "native C++ engine for the Digidesign Command|8 control surface")
