@@ -73,9 +73,16 @@ install(TARGETS ${_command8_bins} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES README.md
         DESTINATION ${CMAKE_INSTALL_DOCDIR})
 
-# Debian-style copyright (satisfies lintian's copyright-file requirement).
+# Debian-style copyright (satisfies lintian's copyright-file requirement; on
+# Debian it references /usr/share/common-licenses/GPL-3 rather than duplicating
+# the ~35 KB license text in every package's doc dir).
 install(FILES debian/copyright
         DESTINATION ${CMAKE_INSTALL_DOCDIR})
+
+# Full GPL-3.0 text, shipped in every package + a plain `cmake --install` so
+# consumers off Debian (the .tar.gz) get the license even without a system
+# /usr/share/common-licenses/GPL-3 to reference.
+install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})
 
 # Compress the changelog and man pages with `gzip -9n` (deterministic, no
 # timestamp) at configure time, then install the .gz. These paths don't depend
