@@ -1,0 +1,72 @@
+# OSC pattern config for the Digidesign Command|8 via command8-linux.
+#
+# Install: copy to your Reaper OSC config dir, e.g.
+#   ~/.config/REAPER/OSC/Command8.ReaperOSC   (Linux)
+# then in Reaper: Preferences -> Control/OSC/web -> Add -> OSC (Open Sound
+# Control), Pattern config = "Command8". Set the device to:
+#   Receive on port 8000   (Reaper receives what the bridge sends)
+#   Send to port 9000      (Reaper sends feedback to the bridge)
+# i.e. mirror of the bridge's --osc-send-port 8000 / --osc-recv-port 9000.
+#
+# The bridge speaks the addresses below; the `command8.profiles.reaper` profile
+# is the matching half. Bank size is 8 to match the 8 strips.
+
+DEVICE_TRACK_COUNT 8
+DEVICE_ROTARY_CENTER 0
+DEVICE_FX_PARAM_COUNT 8
+DEVICE_FX_FOLLOWS LAST_TOUCHED
+
+# --- per-track (track @ = strip 1..8 within the current bank) ---------------
+TRACK_VOLUME n/track/@/volume
+TRACK_PAN n/track/@/pan
+TRACK_MUTE b/track/@/mute t/track/@/mute/toggle
+TRACK_SOLO b/track/@/solo t/track/@/solo/toggle
+TRACK_SELECT b/track/@/select t/track/@/select/toggle
+TRACK_NAME s/track/@/name
+TRACK_REC_ARM b/track/@/recarm t/track/@/recarm/toggle
+TRACK_MONITOR b/track/@/monitor
+TRACK_VU n/track/@/vu
+TRACK_SEND_VOLUME n/track/@/send/@/volume
+
+# --- device/focused-FX params (Insert + Dynamics encoder modes) -------------
+# Insert mode follows the last-touched FX; Dynamics switches the device FX to a
+# specific slot (the compressor, by convention) via the triggers below.
+FX_PARAM_VALUE n/fxparam/@/value
+FX_PARAM_NAME s/fxparam/@/name
+DEVICE_FX_SELECT i/device/fx/select
+DEVICE_FX_FOLLOWS_LAST_TOUCHED t/device/fx/follows/lasttouched
+DEVICE_FX_FOLLOWS_DEVICE t/device/fx/follows/device
+
+# --- track EQ (EQ encoder mode -> the selected track's ReaEQ) ----------------
+# @ on the BAND lines selects the Nth band of that type (1-based).
+FX_EQ_HIPASS_FREQ n/fxeq/hipass/freq
+FX_EQ_LOSHELF_GAIN n/fxeq/loshelf/gain
+FX_EQ_BAND_FREQ n/fxeq/band/@/freq
+FX_EQ_BAND_GAIN n/fxeq/band/@/gain
+FX_EQ_HISHELF_GAIN n/fxeq/hishelf/gain
+FX_EQ_LOPASS_FREQ n/fxeq/lopass/freq
+
+# --- transport --------------------------------------------------------------
+PLAY t/play
+STOP t/stop
+RECORD t/record
+REPEAT t/repeat
+REWIND b/rewind
+FORWARD b/forward
+
+# --- track bank / single-track nav (Bank / Nudge modes on the arrow keys) ---
+DEVICE_PREV_TRACK_BANK t/device/track/bank/-
+DEVICE_NEXT_TRACK_BANK t/device/track/bank/+
+DEVICE_PREV_TRACK t/device/track/-
+DEVICE_NEXT_TRACK t/device/track/+
+
+# --- generic action trigger + view nav (arrow keys: scroll / zoom) ----------
+ACTION t/action/@
+SCROLL_X- b/scroll/x/-
+SCROLL_X+ b/scroll/x/+
+SCROLL_Y- b/scroll/y/-
+SCROLL_Y+ b/scroll/y/+
+ZOOM_X- b/zoom/x/-
+ZOOM_X+ b/zoom/x/+
+ZOOM_Y- b/zoom/y/-
+ZOOM_Y+ b/zoom/y/+

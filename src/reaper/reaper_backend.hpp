@@ -2,7 +2,7 @@
 // Reaper host integration: a Backend speaking Reaper's OSC (via liblo), matching
 // reaper/Command8.ReaperOSC. Built on libcommand8; the core has no OSC/DAW dep.
 //
-// Ports the command8-linux Python `reaper` profile: 5 encoder-assign modes
+// Ports the original Python driver's `reaper` profile: 5 encoder-assign modes
 // (Pan/Send/Insert/EQ/Dynamics), Flip, nav modes (Bank/Nudge/Zoom), the LCD
 // name/value grid, Display-Mode hold, ring-on-knob-turn, transport, RecSel arm,
 // and the action buttons. (Not ported: the temporary fader-value LCD flash.)

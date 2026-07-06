@@ -120,6 +120,10 @@ install(TARGETS ${_command8_bins} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES README.md
         DESTINATION ${CMAKE_INSTALL_DOCDIR})
 
+# Reaper OSC pattern file; point Reaper's OSC control surface at it.
+install(FILES reaper/Command8.ReaperOSC
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/command8)
+
 # Full GPL-3.0 text, shipped in every package + a plain `cmake --install` so
 # consumers off Debian (the .tar.gz / .zip) get the license even without a
 # system /usr/share/common-licenses/GPL-3 to reference.

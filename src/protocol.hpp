@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Digidesign Command|8 native MIDI protocol: decode (input) + encode (feedback).
-// Ported from the command8-linux Python driver; see its docs/PROTOCOL.md for the
-// reverse-engineering evidence. DAW-agnostic: this layer knows nothing about OSC
-// or any specific host application.
+// See docs/PROTOCOL.md for the reverse-engineering evidence. DAW-agnostic: this
+// layer knows nothing about OSC or any specific host application.
 #pragma once
 
 #include <cstdint>

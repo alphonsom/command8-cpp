@@ -1,17 +1,20 @@
 # command8-cpp
 
 A native C++ userspace engine for the **Digidesign Command|8** control surface
-on Linux and Windows. It is the DAW-agnostic core of the
-[command8-linux](https://github.com/alphonsom/command8-linux) project (the
-Python OSC bridge), reimplemented as a compiled library + daemon —
-**without** any host-specific (Reaper/OSC) parts.
+on Linux and Windows: a DAW-agnostic core library + bridges for Reaper (OSC)
+and any Mackie-Control-capable DAW (Bitwig, …). Grew out of a Python
+proof-of-concept driver; the protocol documentation ([docs/PROTOCOL.md](docs/PROTOCOL.md)),
+the Linux kernel quirk ([quirk/](quirk/)) and the Reaper OSC pattern
+([reaper/](reaper/)) are all included here.
 
 ## Why userspace, not a kernel module
 
 The Command|8 is a **class-compliant USB-MIDI device**. On Linux the only
 kernel-side work is a small `snd-usb-audio` quirk that exposes its hidden MIDI
-*input* port — that lives in `command8-linux` (DKMS) and is reused here
-unchanged. (On Windows the class driver exposes the input as-is; no quirk is
+*input* port — the device's MIDIStreaming input descriptor is malformed, so the
+standard parser creates no input port. The upstream-style patch ships in
+[quirk/](quirk/); apply it to your kernel tree or wrap it in a DKMS package.
+(On Windows the class driver exposes the input as-is; no quirk is
 needed.) Everything else (protocol translation, the wake/keepalive handshake,
 LED/fader/meter/ring/LCD feedback) is ordinary userspace logic: it uses
 floating point, is easy to debug, and a bug crashes one process instead of the
@@ -32,6 +35,9 @@ src/controller.{hpp,cpp}  wires Surface -> Backend, normalizes events
 src/main.cpp              command8-monitor: demo Backend (loopback, no DAW)
 src/reaper/               command8-reaper: Reaper OSC bridge (liblo)
 src/mackie/               command8-mackie: Mackie Control (MCU) emulation
+docs/PROTOCOL.md          protocol reverse-engineering evidence (+ raw captures)
+quirk/                    Linux snd-usb-audio quirk patch (exposes the MIDI input)
+reaper/Command8.ReaperOSC Reaper OSC pattern file for command8-reaper
 ```
 
 `libcommand8` is DAW-agnostic. A **Backend** receives normalized input
@@ -55,6 +61,13 @@ ctest --test-dir build                 # protocol decode/encode unit tests
 ./build/command8-reaper                # Reaper OSC bridge (waits for the device)
 ./build/command8-mackie                # MCU bridge (needs snd-virmidi)
 ```
+
+## Reaper setup (both platforms)
+
+In Reaper: Preferences → Control/OSC/web → Add → **OSC**. Set the pattern
+config to [reaper/Command8.ReaperOSC](reaper/Command8.ReaperOSC) (installed
+packages put it in `<prefix>/share/command8/`), device receives on **8000**,
+sends to **9000** — `command8-reaper`'s defaults.
 
 ## Install / package
 
@@ -136,7 +149,7 @@ own output.
 Proof of concept: opens the device, performs the handshake, runs the keepalive,
 decodes buttons/faders/encoders/fader-touch, and can drive all feedback (LEDs,
 motor faders, meters, encoder rings, LCD). Protocol details and the
-reverse-engineering evidence live in `command8-linux/docs/PROTOCOL.md`.
+reverse-engineering evidence live in [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
 ## Roadmap
 

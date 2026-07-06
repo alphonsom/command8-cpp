@@ -1,0 +1,38 @@
+listening p1: Command|8:Command|8 MIDI 1 16:0
+listening p2: Command|8:Command|8 MIDI 2 16:1
+listening p3: Command|8:Command|8 MIDI 3 16:2
+capturing 40s ...
+---- gap 12.5s ----
+[p1] note_on n=5 v=77               -> FaderTouchEvent(fader=5, touched=True)
+[p1] note_on n=5 v=13               -> FaderTouchEvent(fader=5, touched=False)
+[p1] note_on n=5 v=77               -> FaderTouchEvent(fader=5, touched=True)
+[p1] note_on n=5 v=13               -> FaderTouchEvent(fader=5, touched=False)
+---- gap 1.7s ----
+[p1] note_on n=5 v=77               -> FaderTouchEvent(fader=5, touched=True)
+[p1] note_on n=5 v=13               -> FaderTouchEvent(fader=5, touched=False)
+---- gap 2.6s ----
+[p1] note_on n=5 v=78               -> FaderTouchEvent(fader=6, touched=True)
+[p1] note_on n=5 v=14               -> FaderTouchEvent(fader=6, touched=False)
+[p1] note_on n=5 v=78               -> FaderTouchEvent(fader=6, touched=True)
+[p1] note_on n=5 v=14               -> FaderTouchEvent(fader=6, touched=False)
+---- gap 4.3s ----
+[p1] note_on n=1 v=74               -> ButtonEvent(note=1, category='btn_1_10', subid=10, pressed=True)
+[p1] note_on n=1 v=10               -> ButtonEvent(note=1, category='btn_1_10', subid=10, pressed=False)
+[p1] note_on n=5 v=74               -> FaderTouchEvent(fader=2, touched=True)
+[p1] note_on n=5 v=10               -> FaderTouchEvent(fader=2, touched=False)
+[p1] note_on n=5 v=74               -> FaderTouchEvent(fader=2, touched=True)
+[p1] note_on n=5 v=10               -> FaderTouchEvent(fader=2, touched=False)
+---- gap 4.9s ----
+[p1] note_on n=4 v=75               -> ButtonEvent(note=4, category='btn_4_11', subid=11, pressed=True)
+[p1] note_on n=4 v=11               -> ButtonEvent(note=4, category='btn_4_11', subid=11, pressed=False)
+[p1] note_on n=4 v=75               -> ButtonEvent(note=4, category='btn_4_11', subid=11, pressed=True)
+[p1] note_on n=4 v=11               -> ButtonEvent(note=4, category='btn_4_11', subid=11, pressed=False)
+---- gap 2.3s ----
+[p1] note_on n=5 v=75               -> FaderTouchEvent(fader=3, touched=True)
+[p1] note_on n=5 v=11               -> FaderTouchEvent(fader=3, touched=False)
+---- gap 4.5s ----
+[p1] note_on n=8 v=74               -> ButtonEvent(note=8, category='btn_8_10', subid=10, pressed=True)
+[p1] note_on n=8 v=10               -> ButtonEvent(note=8, category='btn_8_10', subid=10, pressed=False)
+
+=== 24 messages ===
+per port: {'p1': 24}

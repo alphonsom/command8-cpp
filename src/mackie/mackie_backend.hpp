@@ -5,7 +5,7 @@
 // libcommand8 with a MidiPort for the MCU side, so the translation logic is
 // transport-agnostic.
 //
-// See command8-linux command8/mackie.py for the reference translation.
+// Translation ported from the original Python driver's mackie profile.
 #pragma once
 
 #include <array>

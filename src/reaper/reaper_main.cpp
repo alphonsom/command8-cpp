@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // command8-reaper: bridge the Command|8 to Reaper over OSC. Load
-// reaper/Command8.ReaperOSC (from command8-linux) as the Reaper OSC pattern and
-// set the device to receive on 8000 / send to 9000.
+// reaper/Command8.ReaperOSC (shipped in this repo) as the Reaper OSC pattern
+// and set the device to receive on 8000 / send to 9000.
 //
 // Hotplug: waits for the device at startup and exits the run loop when it is
 // removed, then re-opens on replug (so it self-heals; a systemd user service
