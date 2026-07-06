@@ -64,6 +64,12 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
+      # The runner's vcpkg clone may predate our builtin-baseline; fetch it.
+      - name: Fetch vcpkg baseline commit
+        run: >
+          git -C "$env:VCPKG_INSTALLATION_ROOT" fetch origin
+          (Get-Content vcpkg.json | ConvertFrom-Json).'builtin-baseline'
+
       # Default (Visual Studio) generator: no vcvars needed; static triplet ->
       # self-contained exes, matching the shipped zip.
       - name: Configure
@@ -151,6 +157,12 @@ jobs:
 
       - name: Derive version from tag
         run: echo "VERSION=$($env:GITHUB_REF_NAME -replace '^v','')" >> $env:GITHUB_ENV
+
+      # The runner's vcpkg clone may predate our builtin-baseline; fetch it.
+      - name: Fetch vcpkg baseline commit
+        run: >
+          git -C "$env:VCPKG_INSTALLATION_ROOT" fetch origin
+          (Get-Content vcpkg.json | ConvertFrom-Json).'builtin-baseline'
 
       - name: Configure
         run: >
