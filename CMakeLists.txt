@@ -10,6 +10,11 @@ endif()
 
 if(MSVC)
   set(C8_WARNINGS /W4)
+  # Static-triplet builds (x64-windows-static) get a static CRT too, so the
+  # packaged exes are self-contained (no vcredist, no DLLs in the ZIP).
+  if(VCPKG_TARGET_TRIPLET MATCHES "-static$")
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  endif()
 else()
   set(C8_WARNINGS -Wall -Wextra)
 endif()
@@ -50,25 +55,29 @@ target_compile_options(command8-monitor PRIVATE ${C8_WARNINGS})
 # (vcpkg on Windows, pkg-config elsewhere).
 set(C8_LO_LIBS "")
 if(WIN32)
-  find_package(liblo CONFIG QUIET)
-  foreach(t liblo::liblo liblo::liblo_static liblo::lo liblo::lo_static)
-    if(NOT C8_LO_LIBS AND TARGET ${t})
-      set(C8_LO_LIBS ${t})
-    endif()
-  endforeach()
+  # Don't find_package(liblo): vcpkg's config is unusable with the static
+  # triplet (it exports a shared liblo::liblo pointing at a DLL the static
+  # install doesn't have, a hard error even with QUIET). Locate the pieces
+  # directly; this also works with the dynamic triplet's import lib.
+  # Prefer liblo_static: the static install also ships liblo.lib, but that is
+  # an import lib for a DLL it doesn't contain (same port bug as above).
+  find_library(C8_LO_LIB NAMES liblo_static lo_static lo liblo)
+  find_path(C8_LO_INCLUDE_DIR lo/lo.h)
+  if(C8_LO_LIB AND C8_LO_INCLUDE_DIR)
+    set(C8_LO_LIBS ${C8_LO_LIB} ws2_32 iphlpapi)
+  endif()
 else()
   pkg_check_modules(LIBLO liblo)
   if(LIBLO_FOUND)
     set(C8_LO_LIBS ${LIBLO_LIBRARIES})
+    set(C8_LO_INCLUDE_DIR ${LIBLO_INCLUDE_DIRS})
   endif()
 endif()
 if(C8_LO_LIBS)
   add_executable(command8-reaper
     src/reaper/reaper_main.cpp
     src/reaper/reaper_backend.cpp)
-  if(NOT WIN32)
-    target_include_directories(command8-reaper PRIVATE ${LIBLO_INCLUDE_DIRS})
-  endif()
+  target_include_directories(command8-reaper PRIVATE ${C8_LO_INCLUDE_DIR})
   target_link_libraries(command8-reaper PRIVATE command8 ${C8_LO_LIBS})
   target_compile_options(command8-reaper PRIVATE ${C8_WARNINGS})
 else()
@@ -102,7 +111,7 @@ set(CMAKE_INSTALL_DEFAULT_DIRECTORY_PERMISSIONS
 # Executables. command8-reaper is only defined when liblo was found.
 set(_command8_bins command8-monitor command8-mackie)
 set(_command8_mans man/command8-monitor.1 man/command8-mackie.1)
-if(LIBLO_FOUND)
+if(C8_LO_LIBS)
   list(APPEND _command8_bins command8-reaper)
   list(APPEND _command8_mans man/command8-reaper.1)
 endif()
@@ -111,16 +120,18 @@ install(TARGETS ${_command8_bins} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES README.md
         DESTINATION ${CMAKE_INSTALL_DOCDIR})
 
+# Full GPL-3.0 text, shipped in every package + a plain `cmake --install` so
+# consumers off Debian (the .tar.gz / .zip) get the license even without a
+# system /usr/share/common-licenses/GPL-3 to reference.
+install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})
+
+if(NOT WIN32)   # Debian/lintian conventions: copyright, gzipped changelog + man pages
+
 # Debian-style copyright (satisfies lintian's copyright-file requirement; on
 # Debian it references /usr/share/common-licenses/GPL-3 rather than duplicating
 # the ~35 KB license text in every package's doc dir).
 install(FILES debian/copyright
         DESTINATION ${CMAKE_INSTALL_DOCDIR})
-
-# Full GPL-3.0 text, shipped in every package + a plain `cmake --install` so
-# consumers off Debian (the .tar.gz) get the license even without a system
-# /usr/share/common-licenses/GPL-3 to reference.
-install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})
 
 # Compress the changelog and man pages with `gzip -9n` (deterministic, no
 # timestamp) at configure time, then install the .gz. These paths don't depend
@@ -152,7 +163,7 @@ endforeach()
 # configure time) so ExecStart tracks the actual install prefix / DESTDIR --
 # e.g. /usr for the .deb, /usr/local for a plain `cmake --install`. Only
 # meaningful when command8-reaper is built.
-if(LIBLO_FOUND)
+if(C8_LO_LIBS)
   # Pre-create the unit dir with the default 0755 perms; otherwise the
   # configure_file below creates it implicitly under the builder's umask (0775).
   install(DIRECTORY DESTINATION ${CMAKE_INSTALL_LIBDIR}/systemd/user)
@@ -170,7 +181,9 @@ if(LIBLO_FOUND)
   ]])
 endif()
 
-# --- packaging (CPack: .deb + .tar.gz) ---
+endif()   # NOT WIN32
+
+# --- packaging (CPack: .deb + .tar.gz on Linux, .zip on Windows) ---
 set(CPACK_PACKAGE_NAME command8)
 # Overridable from the release tag: cmake -B build -DCOMMAND8_VERSION=1.2.3
 set(COMMAND8_VERSION "0.1.0" CACHE STRING "Package version (x.y.z)")
@@ -182,15 +195,19 @@ set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
 # leading spaces (verbatim) -- keeps lintian happy (unlike feeding it README).
 set(CPACK_PACKAGE_DESCRIPTION
 "command8 is a native C++ userspace engine for the Digidesign Command|8
-control surface on Linux. It performs the USB-MIDI wake/keepalive handshake,
+control surface. It performs the USB-MIDI wake/keepalive handshake,
 decodes buttons, faders, encoders and fader-touch, and drives all device
 feedback: LEDs, motor faders, meters, encoder rings and the LCD.
 .
 It ships a DAW-agnostic loopback demo (command8-monitor), a Reaper OSC bridge
 (command8-reaper) and a Mackie Control translator (command8-mackie), plus a
 self-healing systemd user service for the Reaper bridge.")
-set(CPACK_STRIP_FILES ON)                       # strip binaries (lintian)
-set(CPACK_GENERATOR "TGZ;DEB")
+if(WIN32)
+  set(CPACK_GENERATOR "ZIP")                    # portable zip of static exes
+else()
+  set(CPACK_STRIP_FILES ON)                     # strip binaries (lintian)
+  set(CPACK_GENERATOR "TGZ;DEB")
+endif()
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)          # auto-detect libasound2/liblo deps
 set(CPACK_DEBIAN_PACKAGE_SECTION "sound")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Alphonso Mango <alphonso.mango@outlook.com>")

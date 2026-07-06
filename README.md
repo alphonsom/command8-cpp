@@ -92,7 +92,8 @@ manifest automatically:
 
 ```bat
 cmake -S . -B build -G Ninja ^
-  -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake
+  -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake ^
+  -DVCPKG_TARGET_TRIPLET=x64-windows-static
 cmake --build build
 ctest --test-dir build
 build\command8-monitor.exe --list      # check the Command|8's ports are visible
@@ -102,7 +103,15 @@ build\command8-mackie.exe              # MCU bridge (see below)
 ```
 
 (From a plain VS developer prompt, `%VCPKG_ROOT%` is
-`%VSINSTALLDIR%VC\vcpkg`.)
+`%VSINSTALLDIR%VC\vcpkg`. The static triplet folds RtMidi, liblo and the MSVC
+runtime into the exes; drop it for a plain dynamic dev build.)
+
+Package a portable ZIP of the self-contained exes (`command8-<ver>-win64.zip`;
+unzip anywhere, no vcredist or DLLs needed):
+
+```bat
+cd build && cpack
+```
 
 The Command|8 needs no driver on Windows — the class driver exposes its MIDI
 input and output (`Command|8`, plus `MIDIIN2/3` for the rear MIDI jacks). If
@@ -138,6 +147,8 @@ reverse-engineering evidence live in `command8-linux/docs/PROTOCOL.md`.
 - [x] systemd user service; hotplug (waits for the device, re-opens on replug).
 - [x] Unit tests for `protocol` (decode/encode round-trips, via CTest).
 - [x] Windows port: RtMidi Surface/MidiPort backends, vcpkg manifest, MSVC build.
+- [x] Installables: `.deb`/`.tar.gz` (Linux) and portable `.zip` of static exes
+      (Windows), all via CPack.
 
 ## License
 
