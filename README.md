@@ -14,8 +14,7 @@ kernel-side work is a small `snd-usb-audio` quirk that exposes its hidden MIDI
 *input* port — the device's MIDIStreaming input descriptor is malformed, so the
 standard parser creates no input port. The upstream-style patch ships in
 [quirk/](quirk/); apply it to your kernel tree or wrap it in a DKMS package.
-(On Windows the class driver exposes the input as-is; no quirk is
-needed.) Everything else (protocol translation, the wake/keepalive handshake,
+(On Windows Digidesign/Avid's own driver exposes the input.) Everything else (protocol translation, the wake/keepalive handshake,
 LED/fader/meter/ring/LCD feedback) is ordinary userspace logic: it uses
 floating point, is easy to debug, and a bug crashes one process instead of the
 machine. So this engine is a normal compiled program that talks to the device
@@ -126,7 +125,7 @@ unzip anywhere, no vcredist or DLLs needed):
 cd build && cpack
 ```
 
-The Command|8 needs no driver on Windows — the class driver exposes its MIDI
+The Command|8 needs Digidesign/Avid's own driver on Windows to expose its MIDI
 input and output (`Command|8`, plus `MIDIIN2/3` for the rear MIDI jacks). If
 another app (a DAW) holds the port, close it first: WinMM ports are exclusive.
 
