@@ -1,0 +1,9 @@
+command8 (0.1.0) unstable; urgency=low
+
+  * Initial release: native C++ userspace engine for the Digidesign Command|8
+    control surface, with a DAW-agnostic core, a Reaper OSC bridge
+    (command8-reaper), a Mackie Control translator (command8-mackie), a
+    loopback demo (command8-monitor), a systemd user service, and CPack
+    packaging (.deb / .tar.gz).
+
+ -- Alphonso Mango <alphonso.mango@outlook.com>  Mon, 06 Jul 2026 00:00:00 +0000

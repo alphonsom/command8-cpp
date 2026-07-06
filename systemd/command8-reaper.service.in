@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # systemd *user* service for the Command|8 -> Reaper OSC bridge.
 #
-# Install:
-#   mkdir -p ~/.config/systemd/user
-#   cp systemd/command8-reaper.service ~/.config/systemd/user/
-#   systemctl --user daemon-reload
+# Installed by the command8 package to a systemd user-unit directory. Enable with:
 #   systemctl --user enable --now command8-reaper
+#
+# (When building from source without installing, copy this to
+#  ~/.config/systemd/user/ and point ExecStart at your build/ binary.)
 #
 # The daemon self-heals: it waits for the Command|8 to appear and exits its run
 # loop when the device is removed, re-opening on replug. Restart=always also
@@ -18,7 +18,7 @@ After=default.target
 
 [Service]
 Type=simple
-ExecStart=%h/command8-cpp/build/command8-reaper
+ExecStart=@COMMAND8_BINDIR@/command8-reaper
 Restart=always
 RestartSec=2
 

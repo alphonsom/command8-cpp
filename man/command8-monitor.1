@@ -1,0 +1,19 @@
+.TH COMMAND8-MONITOR 1 "2026-07-06" "command8 0.1.0" "command8 manual"
+.SH NAME
+command8\-monitor \- loopback demo for the Digidesign Command|8 control surface
+.SH SYNOPSIS
+.B command8\-monitor
+.SH DESCRIPTION
+.B command8\-monitor
+opens the Command|8 over ALSA, performs the USB\-MIDI wake/keepalive
+handshake, and runs a pure\-loopback demo Backend: faders drive meters,
+encoders move the pan dot, and select/mute/solo toggle their LEDs. It needs no
+DAW and is useful for verifying that the device, the kernel MIDI\-input quirk,
+and the protocol layer all work.
+.PP
+It waits for the device to appear and re\-opens it on replug.
+.SH SEE ALSO
+.BR command8\-reaper (1),
+.BR command8\-mackie (1)
+.SH AUTHOR
+Alphonso Mango <alphonso.mango@outlook.com>

@@ -1,0 +1,28 @@
+.TH COMMAND8-REAPER 1 "2026-07-06" "command8 0.1.0" "command8 manual"
+.SH NAME
+command8\-reaper \- Command|8 to Reaper OSC bridge
+.SH SYNOPSIS
+.B command8\-reaper
+.SH DESCRIPTION
+.B command8\-reaper
+bridges the Digidesign Command|8 control surface to the Reaper DAW over OSC
+(via liblo). It translates normalized surface input into OSC and drives all
+device feedback \(em motor faders, meters, encoder rings, LEDs and the LCD \(em
+from Reaper's state, including encoder modes, Flip, navigation and the LCD grid.
+.PP
+The daemon self\-heals: it waits for the Command|8 to appear, exits its run loop
+when the device is removed, and re\-opens on replug. Run only one bridge at a
+time \(em stop any other Command|8 client first.
+.SH FILES
+.TP
+.I \fB<prefix>\fR/lib/systemd/user/command8\-reaper.service
+systemd
+.B user
+service unit. Enable with
+.RB "\(oq" "systemctl \-\-user enable \-\-now command8\-reaper" "\(cq" .
+.SH SEE ALSO
+.BR command8\-monitor (1),
+.BR command8\-mackie (1),
+.BR systemctl (1)
+.SH AUTHOR
+Alphonso Mango <alphonso.mango@outlook.com>

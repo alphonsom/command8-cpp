@@ -46,14 +46,33 @@ ctest --test-dir build                 # protocol decode/encode unit tests
 ./build/command8-reaper                # Reaper OSC bridge (waits for the device)
 ```
 
+## Install / package
+
+```sh
+cmake --install build --prefix /usr/local     # binaries + systemd user unit + docs
+```
+
+Or build distributable packages (a `.deb` and a `.tar.gz`) with CPack:
+
+```sh
+cd build && cpack                              # -> command8-<ver>-Linux.deb / .tar.gz
+sudo apt install ./command8-*-Linux.deb        # deps (libasound2, liblo) auto-resolved
+```
+
+Either way, `command8-reaper`'s `ExecStart` is rewritten to the real install
+prefix (`/usr/bin` for the `.deb`, `/usr/local/bin` for a plain install), and the
+systemd **user** unit lands in `<prefix>/lib/systemd/user/`.
+
 Run `command8-reaper` as a **systemd user service** (self-heals on unplug/replug):
 
 ```sh
-mkdir -p ~/.config/systemd/user
-cp systemd/command8-reaper.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now command8-reaper
 ```
+
+(Building from source without installing? Copy `systemd/command8-reaper.service.in`
+to `~/.config/systemd/user/command8-reaper.service` and set `ExecStart` to your
+`build/command8-reaper`.)
 
 ## Status
 

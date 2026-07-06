@@ -1,0 +1,18 @@
+.TH COMMAND8-MACKIE 1 "2026-07-06" "command8 0.1.0" "command8 manual"
+.SH NAME
+command8\-mackie \- Mackie Control (MCU) translator for the Command|8
+.SH SYNOPSIS
+.B command8\-mackie
+.SH DESCRIPTION
+.B command8\-mackie
+presents the Digidesign Command|8 to a DAW as a Mackie Control (MCU) surface,
+using ALSA only (no extra dependencies). It maps V\-pot assignment and the
+navigation buttons (Pan/Send/Insert/EQ/Dyn and Bank/Nudge/Zoom/Flip) and
+drives device feedback from incoming MCU messages.
+.PP
+It waits for the device to appear and re\-opens it on replug.
+.SH SEE ALSO
+.BR command8\-monitor (1),
+.BR command8\-reaper (1)
+.SH AUTHOR
+Alphonso Mango <alphonso.mango@outlook.com>
