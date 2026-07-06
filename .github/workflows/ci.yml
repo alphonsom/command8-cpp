@@ -47,6 +47,47 @@ jobs:
             build/command8-*-Linux.tar.gz
           if-no-files-found: error
 
+  build-windows:
+    name: build + test + package (windows)
+    if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/')
+    runs-on: windows-latest
+    env:
+      # Cache vcpkg's built packages (rtmidi/liblo static) in the Actions cache.
+      VCPKG_BINARY_SOURCES: 'clear;x-gha,readwrite'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Export Actions cache env for vcpkg
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      # Default (Visual Studio) generator: no vcvars needed; static triplet ->
+      # self-contained exes, matching the shipped zip.
+      - name: Configure
+        run: >
+          cmake -B build
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=x64-windows-static
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build --build-config Release --output-on-failure
+
+      - name: Package (.zip)
+        run: cd build; cpack -C Release
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: command8-windows-package
+          path: build/command8-*-win64.zip
+          if-no-files-found: error
+
   release:
     name: release on tag
     # Runs only for pushed v* tags; builds with the version taken from the tag.
@@ -88,3 +129,46 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             build/command8-*-Linux.deb build/command8-*-Linux.tar.gz \
             --title "$GITHUB_REF_NAME" --generate-notes
+
+  release-windows:
+    name: attach windows zip to release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release   # the release must exist before uploading to it
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      VCPKG_BINARY_SOURCES: 'clear;x-gha,readwrite'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Export Actions cache env for vcpkg
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Derive version from tag
+        run: echo "VERSION=$($env:GITHUB_REF_NAME -replace '^v','')" >> $env:GITHUB_ENV
+
+      - name: Configure
+        run: >
+          cmake -B build
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=x64-windows-static
+          -DCOMMAND8_VERSION="$env:VERSION"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build --build-config Release --output-on-failure
+
+      - name: Package (.zip)
+        run: cd build; cpack -C Release
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$env:GITHUB_REF_NAME" (Get-Item build/command8-*-win64.zip)
