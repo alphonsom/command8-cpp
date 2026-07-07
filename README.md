@@ -2,23 +2,17 @@
 
 A native C++ userspace engine for the **Digidesign Command|8** control surface
 on Linux and Windows: a DAW-agnostic core library + bridges for Reaper (OSC)
-and any Mackie-Control-capable DAW (Bitwig, …). Grew out of a Python
-proof-of-concept driver; the protocol documentation ([docs/PROTOCOL.md](docs/PROTOCOL.md)),
+and any Mackie-Control-capable DAW (Bitwig, …). The protocol documentation ([docs/PROTOCOL.md](docs/PROTOCOL.md)),
 the Linux kernel quirk ([quirk/](quirk/)) and the Reaper OSC pattern
 ([reaper/](reaper/)) are all included here.
 
-## Why userspace, not a kernel module
-
-The Command|8 is a **class-compliant USB-MIDI device**. On Linux the only
-kernel-side work is a small `snd-usb-audio` quirk that exposes its hidden MIDI
+For Linux there is a `snd-usb-audio` quirk to expose the hidden MIDI
 *input* port — the device's MIDIStreaming input descriptor is malformed, so the
-standard parser creates no input port. The upstream-style patch ships in
+standard parser does not create one. The patch is in
 [quirk/](quirk/); apply it to your kernel tree or wrap it in a DKMS package.
-(On Windows Digidesign/Avid's own driver exposes the input.) Everything else (protocol translation, the wake/keepalive handshake,
-LED/fader/meter/ring/LCD feedback) is ordinary userspace logic: it uses
-floating point, is easy to debug, and a bug crashes one process instead of the
-machine. So this engine is a normal compiled program that talks to the device
-over ALSA (Linux) or RtMidi/WinMM (Windows).
+(On Windows, Digidesign/Avid's own driver exposes the input.) Everything else (protocol translation, the wake/keepalive handshake,
+LED/fader/meter/ring/LCD feedback) is ordinary userspace logic: So this engine is a normal compiled program that talks to the device
+over ALSA (Linux) or RtMidi/WinMM (Windows), giving full access to the surface controls and feedback, but with some buttons (EQ, Dynamics) not reproducing the exact function they have in Pro Tools.
 
 ## Layout
 
