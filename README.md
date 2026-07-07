@@ -137,24 +137,6 @@ midi loopback create --name-a "Command8 MCU A" --name-b "Command8 MCU B"
 input *and* output at side **B**. The pair is crossed, so neither end hears its
 own output.
 
-## Status
-
-Proof of concept: opens the device, performs the handshake, runs the keepalive,
-decodes buttons/faders/encoders/fader-touch, and can drive all feedback (LEDs,
-motor faders, meters, encoder rings, LCD). Protocol details and the
-reverse-engineering evidence live in [docs/PROTOCOL.md](docs/PROTOCOL.md).
-
-## Roadmap
-
-- [x] Normalized value/event abstraction above the raw protocol.
-- [x] Pluggable host Backend interface + Feedback handle.
-- [x] Reaper Backend front-end (encoder modes, Flip, nav, LCD grid, actions,
-      ring-on-knob-turn, Channel-Data fader flash) — hardware-validated.
-- [x] systemd user service; hotplug (waits for the device, re-opens on replug).
-- [x] Unit tests for `protocol` (decode/encode round-trips, via CTest).
-- [x] Windows port: RtMidi Surface/MidiPort backends, vcpkg manifest, MSVC build.
-- [x] Installables: `.deb`/`.tar.gz` (Linux) and portable `.zip` of static exes
-      (Windows), all via CPack.
 
 ## License
 
