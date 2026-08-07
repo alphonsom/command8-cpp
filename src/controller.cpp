@@ -20,7 +20,12 @@ void Controller::dispatch(const Event& ev) {
 
 void Controller::run() {
     surface_.set_callback([this](const Event& ev) { dispatch(ev); });
-    surface_.set_tick([this]() { backend_.tick(); });
+    // Feedback::tick() drives meter falloff, so it must run on every tick
+    // regardless of what the back-end does with its own.
+    surface_.set_tick([this]() {
+        feedback_.tick();
+        backend_.tick();
+    });
     backend_.on_start();
     surface_.run();
 }
