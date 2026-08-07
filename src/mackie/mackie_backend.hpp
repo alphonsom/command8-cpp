@@ -25,10 +25,15 @@ namespace command8 {
 // Windows MIDI Services loopback pair (create once with
 //   midi loopback create --name-a "Command8 MCU A" --name-b "Command8 MCU B"
 // ); the bridge opens A both ways and the DAW's Mackie Control uses B, so
-// neither hears its own output.
-#ifdef _WIN32
+// neither hears its own output. macOS: these are the names of the virtual
+// ports the bridge CREATES rather than ones to search for, so no loopback is
+// needed and the DAW points at this name for both directions.
+#if defined(_WIN32)
 inline constexpr const char* kDefaultMcuRecvMatch = "Command8 MCU A";
 inline constexpr const char* kDefaultMcuSendMatch = "Command8 MCU A";
+#elif defined(__APPLE__)
+inline constexpr const char* kDefaultMcuRecvMatch = "Command|8";
+inline constexpr const char* kDefaultMcuSendMatch = "Command|8";
 #else
 inline constexpr const char* kDefaultMcuRecvMatch = "VirMIDI";
 inline constexpr const char* kDefaultMcuSendMatch = "VirMIDI";

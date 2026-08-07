@@ -20,8 +20,14 @@ namespace command8 {
 // quirk. On Windows the surface is the device's first port, named exactly
 // "Command|8" (the later ports show up as "MIDIIN2/3 (Command|8)"); the bar
 // also keeps it from matching the "Command8 MCU" loopback endpoints.
-#ifdef _WIN32
+// On macOS there is no MIDI port to match: CoreMIDI cannot expose the device's
+// input (the same malformed descriptor the Linux quirk patches around, with no
+// quirk mechanism available), so that backend claims the USB interface and
+// matches on VID/PID instead. The value is unused there.
+#if defined(_WIN32)
 inline constexpr const char* kDefaultPortMatch = "Command|8";
+#elif defined(__APPLE__)
+inline constexpr const char* kDefaultPortMatch = "";
 #else
 inline constexpr const char* kDefaultPortMatch = "Command|8 MIDI 1";
 #endif

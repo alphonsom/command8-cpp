@@ -36,6 +36,30 @@ if(WIN32)
   target_link_libraries(command8 PUBLIC RtMidi::rtmidi)
   target_compile_definitions(command8 PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN
     _CRT_SECURE_NO_WARNINGS)
+elseif(APPLE)
+  # The surface is raw USB (libusb): CoreMIDI cannot expose the device's MIDI
+  # input, and unlike Linux there is no quirk mechanism to fix that. The MCU
+  # side is ordinary CoreMIDI, and macOS can create virtual ports, so no
+  # loopback utility is needed there.
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(LIBUSB REQUIRED libusb-1.0)
+  find_package(Threads REQUIRED)
+  target_sources(command8 PRIVATE
+    src/macos/macos_surface.cpp
+    src/macos/macos_midi_port.cpp)
+  target_include_directories(command8 PUBLIC ${LIBUSB_INCLUDE_DIRS})
+  target_link_directories(command8 PUBLIC ${LIBUSB_LIBRARY_DIRS})
+  target_link_libraries(command8 PUBLIC ${LIBUSB_LIBRARIES} Threads::Threads)
+  # RtMidi ships a CMake config in some distributions and only a .pc in others.
+  find_package(RtMidi CONFIG QUIET)
+  if(RtMidi_FOUND)
+    target_link_libraries(command8 PUBLIC RtMidi::rtmidi)
+  else()
+    pkg_check_modules(RTMIDI REQUIRED rtmidi)
+    target_include_directories(command8 PUBLIC ${RTMIDI_INCLUDE_DIRS})
+    target_link_directories(command8 PUBLIC ${RTMIDI_LIBRARY_DIRS})
+    target_link_libraries(command8 PUBLIC ${RTMIDI_LIBRARIES})
+  endif()
 else()
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(ALSA REQUIRED alsa)
@@ -97,6 +121,11 @@ add_executable(test_protocol tests/test_protocol.cpp)
 target_link_libraries(test_protocol PRIVATE command8)
 target_compile_options(test_protocol PRIVATE ${C8_WARNINGS})
 add_test(NAME protocol COMMAND test_protocol)
+
+add_executable(test_feedback tests/test_feedback.cpp)
+target_link_libraries(test_feedback PRIVATE command8)
+target_compile_options(test_feedback PRIVATE ${C8_WARNINGS})
+add_test(NAME feedback COMMAND test_feedback)
 
 # --- install ---
 include(GNUInstallDirs)
