@@ -1,18 +1,30 @@
 # command8-cpp
 
 A native C++ userspace engine for the **Digidesign Command|8** control surface
-on Linux and Windows: a DAW-agnostic core library + bridges for Reaper (OSC)
+on Linux, Windows and macOS: a DAW-agnostic core library + bridges for Reaper (OSC)
 and any Mackie-Control-capable DAW (Bitwig, …). The protocol documentation ([docs/PROTOCOL.md](docs/PROTOCOL.md)),
 the Linux kernel quirk ([quirk/](quirk/)) and the Reaper OSC pattern
 ([reaper/](reaper/)) are all included here.
 
-For Linux there is a `snd-usb-audio` quirk to expose the hidden MIDI
-*input* port — the device's MIDIStreaming input descriptor is malformed, so the
-standard parser does not create one. The patch is in
-[quirk/](quirk/); apply it to your kernel tree or wrap it in a DKMS package.
-(On Windows, Digidesign/Avid's own driver exposes the input.) Everything else (protocol translation, the wake/keepalive handshake,
+The device's MIDIStreaming *input* descriptor is malformed, so a standard class
+parser does not create an input port — and each platform needs a different way
+around that:
+
+| | getting the input | MCU bridge needs |
+|---|---|---|
+| **Linux** | `snd-usb-audio` quirk ([quirk/](quirk/)) | `snd-virmidi` |
+| **Windows** | Digidesign/Avid's own driver | a loopback pair |
+| **macOS** | claim the USB interface directly (libusb) | nothing |
+
+macOS is the odd one out in both columns. CoreMIDI has no quirk mechanism, so
+the device's own ports enumerate but stay inert; the backend bypasses CoreMIDI
+on the device side and speaks USB-MIDI packets over libusb instead. In exchange,
+macOS *can* create MIDI endpoints from an application, so the MCU bridge
+publishes its own virtual pair and needs no loopback utility.
+
+Everything else (protocol translation, the wake/keepalive handshake,
 LED/fader/meter/ring/LCD feedback) is ordinary userspace logic: So this engine is a normal compiled program that talks to the device
-over ALSA (Linux) or RtMidi/WinMM (Windows), giving full access to the surface controls and feedback, but with some buttons (EQ, Dynamics) not reproducing the exact function they have in Pro Tools.
+over ALSA (Linux), RtMidi/WinMM (Windows) or libusb (macOS), giving full access to the surface controls and feedback, but with some buttons (EQ, Dynamics) not reproducing the exact function they have in Pro Tools.
 
 ## Layout
 
@@ -22,6 +34,7 @@ src/surface.hpp           Surface interface: device discovery, wake + keepalive,
 src/midi_port.hpp         MidiPort interface: raw-bytes duplex port (MCU side)
 src/alsa/                 ALSA-seq implementations of both (Linux)
 src/rtmidi/               RtMidi implementations of both (Windows)
+src/macos/                libusb Surface + virtual-CoreMIDI MidiPort (macOS)
 src/feedback.{hpp,cpp}    normalized (0..1) feedback: faders/meters/rings/LEDs/LCD
 src/backend.hpp           Backend interface — host integrations subclass this
 src/controller.{hpp,cpp}  wires Surface -> Backend, normalizes events
@@ -55,7 +68,7 @@ ctest --test-dir build                 # protocol decode/encode unit tests
 ./build/command8-mackie                # MCU bridge (needs snd-virmidi)
 ```
 
-## Reaper setup (both platforms)
+## Reaper setup (all platforms)
 
 In Reaper: Preferences → Control/OSC/web → Add → **OSC**. Set the pattern
 config to [reaper/Command8.ReaperOSC](reaper/Command8.ReaperOSC) (installed
@@ -89,6 +102,49 @@ systemctl --user enable --now command8-reaper
 (Building from source without installing? Copy `systemd/command8-reaper.service.in`
 to `~/.config/systemd/user/command8-reaper.service` and set `ExecStart` to your
 `build/command8-reaper`.)
+
+## Build (macOS)
+
+Requires a C++17 compiler (Xcode command line tools), CMake ≥ 3.16, and
+`libusb` + `rtmidi` (plus `liblo` for the Reaper bridge):
+
+```sh
+brew install cmake ninja libusb rtmidi liblo
+cmake -B build -G Ninja
+cmake --build build
+ctest --test-dir build
+sudo ./build/command8-monitor          # loopback demo
+sudo ./build/command8-reaper           # Reaper OSC bridge (identical OSC setup)
+sudo ./build/command8-mackie           # MCU bridge (no loopback needed)
+```
+
+**`sudo` is required, and is not incidental.** The backend has to claim the
+USB interface, which takes it from CoreMIDI's class driver — a privileged
+operation. CoreMIDI reclaims the interface as soon as anything releases it, so
+this applies on every run. Worse, an unprivileged process cannot even *see* the
+device: macOS hides USB devices a process may not touch, so "not plugged in"
+and "not permitted" are indistinguishable from userspace (the error message
+says so rather than guessing).
+
+To avoid typing it every time, run the bridge from a `LaunchDaemon`, which
+starts as root at boot. Note that this does mean a permanently root-owned
+process; the alternatives — unloading the system USB-MIDI driver, a codeless
+kext (deprecated, and blocked on Apple Silicon), or a DriverKit driver
+(needs an Apple entitlement) — are all worse for a self-hosted tool.
+
+If another Command|8 bridge is already running, stop it first: the interface is
+exclusive.
+
+### Mackie bridge on macOS
+
+Nothing to install. `command8-mackie` publishes a virtual MIDI source and
+destination, both named **`Command|8`**; point your DAW's Mackie Control
+surface at that name for *both* its input and its output. Rename with
+`--mcu-recv`/`--mcu-send` if you want something else.
+
+Publishing both endpoints matters: with only a source, a DAW sees an input with
+no matching output and control-surface support reports that it cannot find a
+MIDI output.
 
 ## Build (Windows)
 
