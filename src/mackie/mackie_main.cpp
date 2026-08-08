@@ -49,6 +49,35 @@ int main(int argc, char** argv) {
     std::signal(SIGINT, on_sig);
     std::signal(SIGTERM, on_sig);
 
+    std::unique_ptr<command8::Surface> surface;
+
+#ifdef __APPLE__
+    // Claim the Command|8 *before* touching RtMidi/CoreMIDI (constructed below
+    // via MackieBackend's MidiPort). Once a CoreMIDI client has ever existed
+    // in this process, this process's own future libusb claims of the device
+    // race CoreMIDI's in-process device-notification handling for the same
+    // interface and lose -- so this ordering only buys the very first claim.
+    // It does NOT make replug recovery below sudo-free: once MackieBackend
+    // constructs its RtMidi client, a claim lost to a later unplug cannot be
+    // regained without root from this process, even if that client is torn
+    // down first (verified: tearing down and rebuilding the CoreMIDI client
+    // around the reclaim attempt does not help, and the failure does not
+    // clear with time -- it is a standing condition for the rest of this
+    // process's life, not a transient race). A full fix would need a
+    // privilege-separated helper process to hold the libusb claim, which is
+    // more than this ordering trick can give us; for now, treat first launch
+    // as sudo-free and replug-while-running as still requiring it.
+    // Linux/Windows don't share this problem at all (their MidiPort never
+    // touches the physical device), so they keep the original order below:
+    // fail fast on a missing MCU port without first blocking on hardware that
+    // may not even be plugged in yet.
+    std::printf("command8-mackie: waiting for the Command|8...\n");
+    surface = command8::make_surface();
+    g_surface = surface.get();
+    while (!g_stop && !surface->open(port_match)) nap(2);
+    if (g_stop) { std::printf("\nbye\n"); return 0; }
+#endif
+
     command8::MackieBackend backend(recv_match, send_match);
     if (!backend.ok()) {
 #ifdef _WIN32
@@ -64,19 +93,29 @@ int main(int argc, char** argv) {
 #endif
         return 1;
     }
+
+#ifdef __APPLE__
+    std::printf("command8-mackie: MCU up.\n");
+#else
     std::printf("command8-mackie: MCU up; waiting for the Command|8...\n");
+    surface = command8::make_surface();
+    g_surface = surface.get();
+    while (!g_stop && !surface->open(port_match)) nap(2);
+    if (g_stop) { std::printf("\nbye\n"); return 0; }
+#endif
 
     while (!g_stop) {
-        auto surface = command8::make_surface();
-        g_surface = surface.get();
-        if (!surface->open(port_match)) { g_surface = nullptr; nap(2); continue; }
         command8::Controller controller(*surface, backend);  // attaches Feedback
         controller.run();                                    // blocks
         backend.stop();                                      // stop rx before fb dies
         surface->close();
-        g_surface = nullptr;
-        if (!g_stop) std::printf("command8-mackie: device removed; waiting...\n");
+        if (g_stop) break;
+        std::printf("command8-mackie: device removed; waiting...\n");
+        surface = command8::make_surface();
+        g_surface = surface.get();
+        while (!g_stop && !surface->open(port_match)) nap(2);
     }
+    g_surface = nullptr;
     std::printf("\nbye\n");
     return 0;
 }
