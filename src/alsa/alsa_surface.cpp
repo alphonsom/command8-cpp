@@ -192,9 +192,10 @@ void AlsaSurface::run() {
     }
 }
 
-std::unique_ptr<Surface> make_surface() { return std::make_unique<AlsaSurface>(); }
-
-void print_midi_ports() {
+// The libusb backend supplies its own factory when it is built; see
+// src/usb/usb_surface.cpp. AlsaSurface remains constructible either way, so
+// COMMAND8_BACKEND=alsa can still select it at runtime.
+void alsa_print_midi_ports() {
     snd_seq_t* seq = nullptr;
     if (snd_seq_open(&seq, "default", SND_SEQ_OPEN_DUPLEX, 0) < 0) {
         std::fprintf(stderr, "command8: cannot open ALSA sequencer\n");
@@ -221,5 +222,10 @@ void print_midi_ports() {
     }
     snd_seq_close(seq);
 }
+
+#ifndef COMMAND8_NO_FACTORY
+std::unique_ptr<Surface> make_surface() { return std::make_unique<AlsaSurface>(); }
+void print_midi_ports() { alsa_print_midi_ports(); }
+#endif
 
 }  // namespace command8

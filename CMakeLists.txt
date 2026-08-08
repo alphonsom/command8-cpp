@@ -47,6 +47,38 @@ else()
   target_link_libraries(command8 PUBLIC ${ALSA_LIBRARIES} Threads::Threads)
 endif()
 
+# libusb Surface backend: drives the device's bulk endpoints directly, so no
+# operating system ever parses the Command|8's malformed MIDIStreaming
+# descriptor. Works identically on Linux, macOS and Windows, which the ALSA and
+# RtMidi backends cannot. Enabled automatically wherever libusb is available.
+option(COMMAND8_USB_BACKEND "Use the libusb Surface backend when available" ON)
+if(COMMAND8_USB_BACKEND)
+  if(NOT PkgConfig_FOUND)
+    find_package(PkgConfig)
+  endif()
+  if(PkgConfig_FOUND)
+    pkg_check_modules(LIBUSB libusb-1.0)
+  endif()
+  if(LIBUSB_FOUND)
+    find_package(Threads REQUIRED)
+    target_sources(command8 PRIVATE src/usb/usb_surface.cpp)
+    target_include_directories(command8 PUBLIC ${LIBUSB_INCLUDE_DIRS})
+    target_link_directories(command8 PUBLIC ${LIBUSB_LIBRARY_DIRS})
+    target_link_libraries(command8 PUBLIC ${LIBUSB_LIBRARIES} Threads::Threads)
+    # The platform backend keeps its class but yields the factory.
+    if(WIN32)
+      set(C8_PLATFORM_SURFACE src/rtmidi/rtmidi_surface.cpp)
+    else()
+      set(C8_PLATFORM_SURFACE src/alsa/alsa_surface.cpp)
+    endif()
+    set_source_files_properties(${C8_PLATFORM_SURFACE} PROPERTIES
+      COMPILE_DEFINITIONS COMMAND8_NO_FACTORY)
+    message(STATUS "command8: libusb Surface backend enabled")
+  else()
+    message(STATUS "command8: libusb not found, using the platform MIDI backend")
+  endif()
+endif()
+
 add_executable(command8-monitor src/main.cpp)
 target_link_libraries(command8-monitor PRIVATE command8)
 target_compile_options(command8-monitor PRIVATE ${C8_WARNINGS})
@@ -97,6 +129,13 @@ add_executable(test_protocol tests/test_protocol.cpp)
 target_link_libraries(test_protocol PRIVATE command8)
 target_compile_options(test_protocol PRIVATE ${C8_WARNINGS})
 add_test(NAME protocol COMMAND test_protocol)
+
+if(LIBUSB_FOUND)
+  add_executable(test_usb_packets tests/test_usb_packets.cpp)
+  target_link_libraries(test_usb_packets PRIVATE command8)
+  target_compile_options(test_usb_packets PRIVATE ${C8_WARNINGS})
+  add_test(NAME usb_packets COMMAND test_usb_packets)
+endif()
 
 # --- install ---
 include(GNUInstallDirs)

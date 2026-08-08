@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Digidesign Command|8 (0dba:8000) — access for the libusb Surface backend.
+#
+# The backend drives the device's bulk endpoints directly, which needs write
+# access to the USB device node. By default that node is root-only.
+#
+#   sudo install -m644 udev/70-command8.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# Then replug the Command|8 (or power-cycle it) so the rule is applied.
+#
+# uaccess hands the device to whoever is logged in at the seat, which is what
+# you want for a desktop DAW machine. The plugdev fallback covers headless or
+# non-logind setups; drop it if your distribution has no plugdev group.
+SUBSYSTEM=="usb", ATTR{idVendor}=="0dba", ATTR{idProduct}=="8000", TAG+="uaccess", MODE="0660", GROUP="plugdev"
