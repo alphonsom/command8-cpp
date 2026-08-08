@@ -113,24 +113,18 @@ brew install cmake ninja libusb rtmidi liblo
 cmake -B build -G Ninja
 cmake --build build
 ctest --test-dir build
-sudo ./build/command8-monitor          # loopback demo
-sudo ./build/command8-reaper           # Reaper OSC bridge (identical OSC setup)
-sudo ./build/command8-mackie           # MCU bridge (no loopback needed)
+./build/command8-monitor               # loopback demo
+./build/command8-reaper                # Reaper OSC bridge (identical OSC setup)
+./build/command8-mackie                # MCU bridge (no loopback needed)
 ```
 
-**`sudo` is required, and is not incidental.** The backend has to claim the
-USB interface, which takes it from CoreMIDI's class driver — a privileged
-operation. CoreMIDI reclaims the interface as soon as anything releases it, so
-this applies on every run. Worse, an unprivileged process cannot even *see* the
-device: macOS hides USB devices a process may not touch, so "not plugged in"
-and "not permitted" are indistinguishable from userspace (the error message
-says so rather than guessing).
-
-To avoid typing it every time, run the bridge from a `LaunchDaemon`, which
-starts as root at boot. Note that this does mean a permanently root-owned
-process; the alternatives — unloading the system USB-MIDI driver, a codeless
-kext (deprecated, and blocked on Apple Silicon), or a DriverKit driver
-(needs an Apple entitlement) — are all worse for a self-hosted tool.
+No `sudo` needed: on the machine this was verified on (macOS 15.6, Intel,
+Homebrew, libusb 1.0.30) `command8-monitor` claims the USB interface and gets
+live fader/encoder input and LED feedback as a normal user. If your setup
+instead reports "device not found" or a claim failure, it's most likely
+another process already holding the interface (see below) or a stricter USB
+permission policy on your machine — try `sudo` as a fallback in that case, and
+consider a `LaunchDaemon` if you need it every run.
 
 If another Command|8 bridge is already running, stop it first: the interface is
 exclusive.

@@ -43,4 +43,8 @@ private:
     std::mutex out_mutex_;
 };
 
+// List the ALSA sequencer ports. Always available so the libusb backend's
+// diagnostics can fall back to it under COMMAND8_BACKEND=alsa.
+void alsa_print_midi_ports();
+
 }  // namespace command8

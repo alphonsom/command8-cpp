@@ -1,18 +1,28 @@
 --- a/sound/usb/quirks-table.h	2026-06-19 12:42:39.000000000 +0100
 +++ b/sound/usb/quirks-table.h	2026-06-28 12:31:18.017827678 +0100
-@@ -2404,6 +2404,33 @@
+@@ -2404,6 +2404,43 @@
  	}
  },
  {
 +	/*
 +	 * Digidesign Command|8 control surface.
-+	 * It is a class-compliant USB-MIDI device, but the MIDIStreaming
-+	 * bulk-IN endpoint's class-specific descriptor is malformed
-+	 * (bLength 6 while declaring bNumEmbMIDIJack 3), so the standard
-+	 * parser fails to create any input port - leaving the surface's
-+	 * faders/buttons unreadable.  Force fixed endpoints with 3 in and
-+	 * 3 out cables on the MIDIStreaming interface (1); the bulk
-+	 * endpoints 0x01/0x81 are auto-detected.
++	 *
++	 * The MIDIStreaming descriptors cannot be trusted.  The class-specific
++	 * bulk-IN endpoint descriptor declares bNumEmbMIDIJack 3 but carries
++	 * only two jack IDs; bLength 6 is correct for the two that are there,
++	 * so the count is the wrong field, not the length.  The interface also
++	 * declares only two Embedded MIDI OUT jacks, and the MS header's
++	 * wTotalLength (98) disagrees with the descriptors actually present
++	 * (82).  The standard parser therefore creates no input port and the
++	 * surface's faders and buttons are unreadable.
++	 *
++	 * The declared jack topology does not describe the hardware either:
++	 * both Embedded MIDI OUT jacks are sourced from external (DIN) input
++	 * jacks, yet the surface's own data is observed arriving on cable 0.
++	 * In practice the device presents three inputs (the surface plus two
++	 * DIN) and three outputs, so ignore the descriptors and force fixed
++	 * endpoints with 3 in and 3 out cables on the MIDIStreaming interface
++	 * (1); the bulk endpoints 0x01/0x81 are auto-detected.
 +	 */
 +	USB_DEVICE(0x0dba, 0x8000),
 +	QUIRK_DRIVER_INFO {

@@ -37,19 +37,15 @@ if(WIN32)
   target_compile_definitions(command8 PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN
     _CRT_SECURE_NO_WARNINGS)
 elseif(APPLE)
-  # The surface is raw USB (libusb): CoreMIDI cannot expose the device's MIDI
-  # input, and unlike Linux there is no quirk mechanism to fix that. The MCU
-  # side is ordinary CoreMIDI, and macOS can create virtual ports, so no
-  # loopback utility is needed there.
+  # macOS has no platform Surface: no class driver can enumerate the device and
+  # there is no quirk mechanism, so the libusb backend below is the only option
+  # and is mandatory here. This branch supplies the MCU-facing MidiPort only --
+  # ordinary CoreMIDI via RtMidi, which can create virtual ports, so no loopback
+  # utility is needed.
   find_package(PkgConfig REQUIRED)
-  pkg_check_modules(LIBUSB REQUIRED libusb-1.0)
   find_package(Threads REQUIRED)
-  target_sources(command8 PRIVATE
-    src/macos/macos_surface.cpp
-    src/macos/macos_midi_port.cpp)
-  target_include_directories(command8 PUBLIC ${LIBUSB_INCLUDE_DIRS})
-  target_link_directories(command8 PUBLIC ${LIBUSB_LIBRARY_DIRS})
-  target_link_libraries(command8 PUBLIC ${LIBUSB_LIBRARIES} Threads::Threads)
+  target_sources(command8 PRIVATE src/macos/macos_midi_port.cpp)
+  target_link_libraries(command8 PUBLIC Threads::Threads)
   # RtMidi ships a CMake config in some distributions and only a .pc in others.
   find_package(RtMidi CONFIG QUIET)
   if(RtMidi_FOUND)
@@ -69,6 +65,50 @@ else()
     src/alsa/alsa_midi_port.cpp)
   target_include_directories(command8 PUBLIC ${ALSA_INCLUDE_DIRS})
   target_link_libraries(command8 PUBLIC ${ALSA_LIBRARIES} Threads::Threads)
+endif()
+
+# libusb Surface backend: drives the device's bulk endpoints directly, so no
+# operating system ever parses the Command|8's malformed MIDIStreaming
+# descriptor. Works identically on Linux, macOS and Windows, which the ALSA and
+# RtMidi backends cannot. Enabled automatically wherever libusb is available.
+option(COMMAND8_USB_BACKEND "Use the libusb Surface backend when available" ON)
+if(APPLE AND NOT COMMAND8_USB_BACKEND)
+  message(FATAL_ERROR
+    "COMMAND8_USB_BACKEND cannot be disabled on macOS: it is the only Surface "
+    "implementation there.")
+endif()
+if(COMMAND8_USB_BACKEND)
+  if(NOT PkgConfig_FOUND)
+    find_package(PkgConfig)
+  endif()
+  if(PkgConfig_FOUND)
+    pkg_check_modules(LIBUSB libusb-1.0)
+  endif()
+  if(LIBUSB_FOUND)
+    find_package(Threads REQUIRED)
+    target_sources(command8 PRIVATE src/usb/usb_surface.cpp)
+    target_include_directories(command8 PUBLIC ${LIBUSB_INCLUDE_DIRS})
+    target_link_directories(command8 PUBLIC ${LIBUSB_LIBRARY_DIRS})
+    target_link_libraries(command8 PUBLIC ${LIBUSB_LIBRARIES} Threads::Threads)
+    # Where a platform Surface exists it keeps its class but yields the factory.
+    # macOS has none, so there is nothing to silence there.
+    if(WIN32)
+      set(C8_PLATFORM_SURFACE src/rtmidi/rtmidi_surface.cpp)
+    elseif(NOT APPLE)
+      set(C8_PLATFORM_SURFACE src/alsa/alsa_surface.cpp)
+    endif()
+    if(C8_PLATFORM_SURFACE)
+      set_source_files_properties(${C8_PLATFORM_SURFACE} PROPERTIES
+        COMPILE_DEFINITIONS COMMAND8_NO_FACTORY)
+    endif()
+    message(STATUS "command8: libusb Surface backend enabled")
+  elseif(APPLE)
+    message(FATAL_ERROR
+      "libusb-1.0 is required on macOS (brew install libusb): it provides the "
+      "only Surface implementation for this platform.")
+  else()
+    message(STATUS "command8: libusb not found, using the platform MIDI backend")
+  endif()
 endif()
 
 add_executable(command8-monitor src/main.cpp)
@@ -126,6 +166,13 @@ add_executable(test_feedback tests/test_feedback.cpp)
 target_link_libraries(test_feedback PRIVATE command8)
 target_compile_options(test_feedback PRIVATE ${C8_WARNINGS})
 add_test(NAME feedback COMMAND test_feedback)
+
+if(LIBUSB_FOUND)
+  add_executable(test_usb_packets tests/test_usb_packets.cpp)
+  target_link_libraries(test_usb_packets PRIVATE command8)
+  target_compile_options(test_usb_packets PRIVATE ${C8_WARNINGS})
+  add_test(NAME usb_packets COMMAND test_usb_packets)
+endif()
 
 # --- install ---
 include(GNUInstallDirs)
