@@ -20,8 +20,16 @@ namespace command8 {
 // quirk. On Windows the surface is the device's first port, named exactly
 // "Command|8" (the later ports show up as "MIDIIN2/3 (Command|8)"); the bar
 // also keeps it from matching the "Command8 MCU" loopback endpoints.
-#ifdef _WIN32
+// The value is unused wherever UsbSurface is the backend, which is everywhere
+// libusb is available: it matches on VID/PID instead. No class driver on any
+// platform successfully claims the MIDIStreaming interface -- on a stock Linux
+// kernel snd-usb-audio binds neither interface, and the macOS and Windows class
+// drivers reject it outright -- so there is no port to name and nothing to
+// detach. On macOS there is no alternative backend at all.
+#if defined(_WIN32)
 inline constexpr const char* kDefaultPortMatch = "Command|8";
+#elif defined(__APPLE__)
+inline constexpr const char* kDefaultPortMatch = "";
 #else
 inline constexpr const char* kDefaultPortMatch = "Command|8 MIDI 1";
 #endif

@@ -49,7 +49,11 @@ public:
     void send(const std::vector<uint8_t>& bytes) override;
     void run() override;
     void stop() override { running_ = false; }
-    bool device_present() override { return present_.load(); }
+
+    // Scans the bus rather than reporting a cached flag, so it is meaningful
+    // before open() as well as after -- matching AlsaSurface, whose callers may
+    // poll it while waiting for the device to appear.
+    bool device_present() override;
 
 private:
     void keepalive_loop();

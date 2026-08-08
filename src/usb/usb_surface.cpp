@@ -7,7 +7,9 @@
 #include <cstring>
 #include <memory>
 
-#ifndef _WIN32
+// ALSA is Linux-only. Guarding on !_WIN32 would drag <alsa/asoundlib.h> into the
+// macOS build, where it does not exist.
+#if defined(__linux__)
 #include "alsa/alsa_surface.hpp"
 #endif
 
@@ -110,6 +112,33 @@ void usb_midi_packetize(const std::vector<uint8_t>& midi, uint8_t cable,
 
 UsbSurface::~UsbSurface() { close(); }
 
+bool UsbSurface::device_present() {
+    // Once open, run() and send() maintain present_ from transfer results, which
+    // notices removal faster than a scan would. Before open there is no handle,
+    // so walk the bus instead of reporting a flag that is false by construction.
+    if (dev_) return present_.load();
+
+    libusb_context* ctx = ctx_;
+    libusb_context* tmp = nullptr;
+    if (!ctx) {
+        if (libusb_init(&tmp) != LIBUSB_SUCCESS) return false;
+        ctx = tmp;
+    }
+
+    libusb_device** list = nullptr;
+    const ssize_t n = libusb_get_device_list(ctx, &list);
+    bool found = false;
+    for (ssize_t i = 0; i < n && !found; ++i) {
+        libusb_device_descriptor d{};
+        if (libusb_get_device_descriptor(list[i], &d) == LIBUSB_SUCCESS &&
+            d.idVendor == C8_USB_VID && d.idProduct == C8_USB_PID)
+            found = true;
+    }
+    if (list) libusb_free_device_list(list, 1);
+    if (tmp) libusb_exit(tmp);
+    return found;
+}
+
 bool UsbSurface::open(const std::string& port_match) {
     (void)port_match;
 
@@ -129,9 +158,11 @@ bool UsbSurface::open(const std::string& port_match) {
         return false;
     }
 
-    // Linux only: hands the interface over from snd-usb-audio and reattaches it
-    // on release. Returns NOT_SUPPORTED on macOS and Windows, where no class
-    // driver successfully claims this interface anyway.
+    // Belt and braces. In practice no class driver claims this interface on any
+    // platform -- a stock Linux kernel binds neither interface because the
+    // descriptors fail to parse -- so there is normally nothing to detach. This
+    // covers the case where the quirk-patched snd-usb-audio did bind it, and is
+    // a no-op (NOT_SUPPORTED) on macOS and Windows.
     libusb_set_auto_detach_kernel_driver(dev_, 1);
 
     const int r = libusb_claim_interface(dev_, C8_USB_INTERFACE);
@@ -271,7 +302,7 @@ void UsbSurface::run() {
 // ---- factory ----------------------------------------------------------------
 
 std::unique_ptr<Surface> make_surface() {
-#ifndef _WIN32
+#if defined(__linux__)
     // Escape hatch: the quirk-patched ALSA path still works where it is
     // installed, and is useful for A/B testing this backend against it.
     const char* backend = std::getenv("COMMAND8_BACKEND");
@@ -284,7 +315,7 @@ std::unique_ptr<Surface> make_surface() {
 }
 
 void print_midi_ports() {
-#ifndef _WIN32
+#if defined(__linux__)
     const char* backend = std::getenv("COMMAND8_BACKEND");
     if (backend && std::strcmp(backend, "alsa") == 0) {
         alsa_print_midi_ports();
