@@ -118,13 +118,20 @@ ctest --test-dir build
 ./build/command8-mackie                # MCU bridge (no loopback needed)
 ```
 
-No `sudo` needed: on the machine this was verified on (macOS 15.6, Intel,
-Homebrew, libusb 1.0.30) `command8-monitor` claims the USB interface and gets
-live fader/encoder input and LED feedback as a normal user. If your setup
-instead reports "device not found" or a claim failure, it's most likely
-another process already holding the interface (see below) or a stricter USB
-permission policy on your machine — try `sudo` as a fallback in that case, and
-consider a `LaunchDaemon` if you need it every run.
+No `sudo` needed for `command8-monitor` or `command8-reaper`: on the machine
+this was verified on (macOS 15.6, Intel, Homebrew, libusb 1.0.30)
+`command8-monitor` claims the USB interface and gets live fader/encoder input
+and LED feedback as a normal user, and `command8-reaper` does the same and
+additionally reclaims the interface unprivileged after an unplug/replug cycle
+(re-tested directly, not inferred). Neither binary ever touches RtMidi/CoreMIDI
+(`command8-reaper` only speaks OSC over liblo, and rebuilds its backend fresh
+on every reconnect) — unlike `command8-mackie` below, which does and pays for
+it on replug. If your setup instead reports "device not found" or a claim
+failure, it's most likely another process already holding the interface (see
+below) or a stricter USB permission policy on your machine — try `sudo` as a
+fallback in that case, and consider a `LaunchDaemon` if you need it every run.
+
+`command8-mackie` is different — see below.
 
 If another Command|8 bridge is already running, stop it first: the interface is
 exclusive.
@@ -135,6 +142,20 @@ Nothing to install. `command8-mackie` publishes a virtual MIDI source and
 destination, both named **`Command|8`**; point your DAW's Mackie Control
 surface at that name for *both* its input and its output. Rename with
 `--mcu-recv`/`--mcu-send` if you want something else.
+
+**Sudo-free at launch, but not across a replug.** Publishing those virtual
+ports means this process has a CoreMIDI client for its whole life, and once
+that's true, this process's own future claims of the physical device race
+CoreMIDI's in-process device-notification handling for the same interface —
+and lose. So `command8-mackie` opens the Command|8 unprivileged fine on first
+launch, but if the device is unplugged and replugged while it's running, it
+cannot reclaim the interface again without root (verified: this isn't a
+race that resolves with more retries or more time, and tearing down and
+rebuilding the virtual ports around the reclaim attempt doesn't help either
+— it's a standing condition for the rest of that process's life). If you need
+replug resilience, run it under `sudo` from the start; if you don't (or you're
+fine restarting it after a reconnect), it's the only one of the three bridges
+that's usually unprivileged.
 
 Publishing both endpoints matters: with only a source, a DAW sees an input with
 no matching output and control-surface support reports that it cannot find a
