@@ -13,7 +13,7 @@ around that:
 | | getting the input | MCU bridge needs |
 |---|---|---|
 | **Linux** | `snd-usb-audio` quirk ([quirk/](quirk/)) | `snd-virmidi` |
-| **Windows** | Digidesign/Avid's own driver | a loopback pair |
+| **Windows** | Digidesign/Avid's own driver, **or the dongle** | a loopback pair |
 | **macOS** | claim the USB interface directly (libusb) | nothing |
 
 macOS is the odd one out in both columns. CoreMIDI has no quirk mechanism, so
@@ -113,24 +113,25 @@ brew install cmake ninja libusb rtmidi liblo
 cmake -B build -G Ninja
 cmake --build build
 ctest --test-dir build
-sudo ./build/command8-monitor          # loopback demo
-sudo ./build/command8-reaper           # Reaper OSC bridge (identical OSC setup)
-sudo ./build/command8-mackie           # MCU bridge (no loopback needed)
+./build/command8-monitor               # loopback demo
+./build/command8-reaper                # Reaper OSC bridge (identical OSC setup)
+./build/command8-mackie                # MCU bridge (no loopback needed)
 ```
 
-**`sudo` is required, and is not incidental.** The backend has to claim the
-USB interface, which takes it from CoreMIDI's class driver — a privileged
-operation. CoreMIDI reclaims the interface as soon as anything releases it, so
-this applies on every run. Worse, an unprivileged process cannot even *see* the
-device: macOS hides USB devices a process may not touch, so "not plugged in"
-and "not permitted" are indistinguishable from userspace (the error message
-says so rather than guessing).
+No `sudo` needed for `command8-monitor` or `command8-reaper`: on the machine
+this was verified on (macOS 15.6, Intel, Homebrew, libusb 1.0.30)
+`command8-monitor` claims the USB interface and gets live fader/encoder input
+and LED feedback as a normal user, and `command8-reaper` does the same and
+additionally reclaims the interface unprivileged after an unplug/replug cycle
+(re-tested directly, not inferred). Neither binary ever touches RtMidi/CoreMIDI
+(`command8-reaper` only speaks OSC over liblo, and rebuilds its backend fresh
+on every reconnect) — unlike `command8-mackie` below, which does and pays for
+it on replug. If your setup instead reports "device not found" or a claim
+failure, it's most likely another process already holding the interface (see
+below) or a stricter USB permission policy on your machine — try `sudo` as a
+fallback in that case, and consider a `LaunchDaemon` if you need it every run.
 
-To avoid typing it every time, run the bridge from a `LaunchDaemon`, which
-starts as root at boot. Note that this does mean a permanently root-owned
-process; the alternatives — unloading the system USB-MIDI driver, a codeless
-kext (deprecated, and blocked on Apple Silicon), or a DriverKit driver
-(needs an Apple entitlement) — are all worse for a self-hosted tool.
+`command8-mackie` is different — see below.
 
 If another Command|8 bridge is already running, stop it first: the interface is
 exclusive.
@@ -141,6 +142,20 @@ Nothing to install. `command8-mackie` publishes a virtual MIDI source and
 destination, both named **`Command|8`**; point your DAW's Mackie Control
 surface at that name for *both* its input and its output. Rename with
 `--mcu-recv`/`--mcu-send` if you want something else.
+
+**Sudo-free at launch, but not across a replug.** Publishing those virtual
+ports means this process has a CoreMIDI client for its whole life, and once
+that's true, this process's own future claims of the physical device race
+CoreMIDI's in-process device-notification handling for the same interface —
+and lose. So `command8-mackie` opens the Command|8 unprivileged fine on first
+launch, but if the device is unplugged and replugged while it's running, it
+cannot reclaim the interface again without root (verified: this isn't a
+race that resolves with more retries or more time, and tearing down and
+rebuilding the virtual ports around the reclaim attempt doesn't help either
+— it's a standing condition for the rest of that process's life). If you need
+replug resilience, run it under `sudo` from the start; if you don't (or you're
+fine restarting it after a reconnect), it's the only one of the three bridges
+that's usually unprivileged.
 
 Publishing both endpoints matters: with only a source, a DAW sees an input with
 no matching output and control-surface support reports that it cannot find a
@@ -175,9 +190,19 @@ unzip anywhere, no vcredist or DLLs needed):
 cd build && cpack
 ```
 
-The Command|8 needs Digidesign/Avid's own driver on Windows to expose its MIDI
-input and output (`Command|8`, plus `MIDIIN2/3` for the rear MIDI jacks). If
-another app (a DAW) holds the port, close it first: WinMM ports are exclusive.
+On Windows the Command|8 needs either Digidesign/Avid's own driver to expose its
+MIDI input and output (`Command|8`, plus `MIDIIN2/3` for the rear MIDI jacks),
+or the [command8-dongle](https://github.com/alphonsom/command8-dongle), which
+makes the surface enumerate as an ordinary class-compliant USB-MIDI device with
+no driver at all. Either way the ports look the same to this engine.
+
+**If another app holds the port, close it first: WinMM ports are exclusive.**
+In particular, set the Command|8's input *and* output to disabled in a DAW's
+MIDI device list before starting `command8-reaper` or `command8-mackie` --
+otherwise the engine cannot open the device and simply fails to start. The DAW
+talks to the engine (over OSC, or over the MCU loopback pair), never to the
+surface directly: the Command|8 speaks a proprietary protocol, so a DAW sending
+it generic MIDI just makes the faders twitch and leaves the display Offline.
 
 ### Mackie bridge on Windows
 
