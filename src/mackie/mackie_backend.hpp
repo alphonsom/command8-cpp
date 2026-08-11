@@ -21,16 +21,26 @@
 namespace command8 {
 
 // Default MCU port-name matches. recv = DAW-to-bridge, send = bridge-to-DAW.
-// Linux: one duplex virmidi port carries both directions. Windows: side A of a
-// Windows MIDI Services loopback pair (create once with
-//   midi loopback create --name-a "Command8 MCU A" --name-b "Command8 MCU B"
-// ); the bridge opens A both ways and the DAW's Mackie Control uses B, so
-// neither hears its own output. macOS: these are the names of the virtual
-// ports the bridge CREATES rather than ones to search for, so no loopback is
-// needed and the DAW points at this name for both directions.
+// Linux: one duplex virmidi port carries both directions. Windows: the bridge
+// end of a Windows MIDI Services loopback pair (create once with
+//   midi loopback create --name-a "Command8 MCU Bridge" --name-b "Command8 MCU DAW"
+// ); the bridge opens its own end both ways and the DAW's Mackie Control uses
+// the other, so neither hears its own output. macOS: these are the names of the
+// virtual ports the bridge CREATES rather than ones to search for, so no
+// loopback is needed and the DAW points at this name for both directions.
+//
+// The ends are named for who owns them because "A" and "B" gave no clue which
+// was which, and picking the wrong one in the DAW produces a silent failure
+// that looks exactly like broken hardware.
+//
+// Do NOT put a bar in these names. "Command|8" is the surface port matcher (see
+// kDefaultPortMatch in surface.hpp), and it takes the first prefix match it
+// finds -- a loopback called "Command|8 MCU ..." could win that match ahead of
+// the real device depending on enumeration order. The unbarred "Command8" is
+// what keeps the two families of port distinguishable.
 #if defined(_WIN32)
-inline constexpr const char* kDefaultMcuRecvMatch = "Command8 MCU A";
-inline constexpr const char* kDefaultMcuSendMatch = "Command8 MCU A";
+inline constexpr const char* kDefaultMcuRecvMatch = "Command8 MCU Bridge";
+inline constexpr const char* kDefaultMcuSendMatch = "Command8 MCU Bridge";
 #elif defined(__APPLE__)
 inline constexpr const char* kDefaultMcuRecvMatch = "Command|8";
 inline constexpr const char* kDefaultMcuSendMatch = "Command|8";

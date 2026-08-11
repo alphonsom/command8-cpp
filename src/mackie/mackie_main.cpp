@@ -5,8 +5,11 @@
 // Linux: use a snd-virmidi kernel port so DAWs (e.g. Bitwig) can see it:
 //   sudo modprobe snd-virmidi   -> "Virtual Raw MIDI 4-0..4-3"
 // Windows: create a Windows MIDI Services loopback pair once:
-//   midi loopback create --name-a "Command8 MCU A" --name-b "Command8 MCU B"
-// The bridge uses side A; point the DAW's Mackie Control at side B (in + out).
+//   midi loopback create --name-a "Command8 MCU Bridge" --name-b "Command8 MCU DAW"
+// The bridge takes the "Bridge" end; point the DAW's Mackie Control at the
+// "DAW" end (in + out). Leave the "Command|8 Bridge" device ports themselves
+// disabled in the DAW -- those belong to this process, and a DAW holding them
+// stops it opening the surface at all.
 //
 //   ./command8-mackie [--mcu-port <match>] [--mcu-recv <match>]
 //                     [--mcu-send <match>] [--port <device-match>]
@@ -83,8 +86,8 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
         std::fprintf(stderr, "Could not open the MCU ports ('%s' / '%s'). Create "
                      "the loopback pair first:\n  midi loopback create --name-a "
-                     "\"Command8 MCU A\" --name-b \"Command8 MCU B\"\n(or create "
-                     "cables in loopMIDI) and retry.\n",
+                     "\"Command8 MCU Bridge\" --name-b \"Command8 MCU DAW\"\n"
+                     "(or create cables in loopMIDI) and retry.\n",
                      recv_match.c_str(), send_match.c_str());
 #else
         std::fprintf(stderr, "Could not open an MCU port matching '%s'. Load "
