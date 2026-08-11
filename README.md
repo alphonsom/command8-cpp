@@ -211,12 +211,19 @@ Mackie Control endpoint, so none of the above is needed — no engine process, n
 loopback pair, no OSC. Point the DAW's Mackie Control support straight at it,
 input and output, and leave the surface's own port disabled.
 
-The cable is named `Command8 MCU` on Linux and macOS. On Windows, WinMM names
-cables positionally and ignores the jack strings, so it appears as
-`MIDIIN4 (Command|8 Bridge)` / `MIDIOUT4 (Command|8 Bridge)` — the fourth port.
+Where to find the cable, verified on hardware on all three:
 
-Verified on hardware 2026-08-11: Reaper driving a Command|8 through the dongle
-on Windows with no host software running.
+| OS | Port name |
+|----|-----------|
+| Linux (ALSA) | `Command\|8 Bridge Command8 MCU` |
+| macOS (CoreMIDI) | `command8-cpp - Command\|8 Bridge - Command8 MCU` |
+| Windows (WinMM) | `MIDIIN4 (Command\|8 Bridge)` / `MIDIOUT4 (…)` |
+
+ALSA and CoreMIDI read the per-cable jack strings; WinMM ignores them and names
+cables positionally, so on Windows it is simply **the fourth port**.
+
+Verified 2026-08-11: Reaper driving a Command|8 through the dongle on Windows
+and on macOS, with no host software running on either.
 
 The translation is the same `src/mcu/c8_mcu.c` this repo unit-tests on the
 desktop; the firmware compiles that file directly rather than a copy.
