@@ -21,11 +21,15 @@ namespace command8 {
 // "Command|8" (the later ports show up as "MIDIIN2/3 (Command|8)"); the bar
 // also keeps it from matching the "Command8 MCU" loopback endpoints.
 // The value is unused wherever UsbSurface is the backend, which is everywhere
-// libusb is available: it matches on VID/PID instead. No class driver on any
-// platform successfully claims the MIDIStreaming interface -- on a stock Linux
-// kernel snd-usb-audio binds neither interface, and the macOS and Windows class
-// drivers reject it outright -- so there is no port to name and nothing to
-// detach. On macOS there is no alternative backend at all.
+// libusb is available: it matches on VID/PID instead.
+//
+// Platforms differ in how they fail. On Linux snd-usb-audio does bind both
+// interfaces and creates a card, but only output ports -- "Command8 MIDI 1..3"
+// all show direction O, with no input -- which is what the quirk exists to fix
+// and what UsbSurface sidesteps. It therefore has to detach the kernel driver,
+// which libusb_set_auto_detach_kernel_driver handles (verified: it reattaches
+// on release). macOS and Windows reject the MIDIStreaming interface outright
+// and expose nothing at all; on macOS there is no alternative backend.
 #if defined(_WIN32)
 inline constexpr const char* kDefaultPortMatch = "Command|8";
 #elif defined(__APPLE__)

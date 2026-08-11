@@ -158,11 +158,12 @@ bool UsbSurface::open(const std::string& port_match) {
         return false;
     }
 
-    // Belt and braces. In practice no class driver claims this interface on any
-    // platform -- a stock Linux kernel binds neither interface because the
-    // descriptors fail to parse -- so there is normally nothing to detach. This
-    // covers the case where the quirk-patched snd-usb-audio did bind it, and is
-    // a no-op (NOT_SUPPORTED) on macOS and Windows.
+    // Required on Linux, where snd-usb-audio does claim this interface -- with
+    // or without the quirk. It creates output-only ports from the malformed
+    // descriptors, so the interface is genuinely taken and must be detached;
+    // libusb reattaches the kernel driver when we release it. A no-op
+    // (NOT_SUPPORTED) on macOS and Windows, where no class driver accepts the
+    // device at all.
     libusb_set_auto_detach_kernel_driver(dev_, 1);
 
     const int r = libusb_claim_interface(dev_, C8_USB_INTERFACE);

@@ -13,7 +13,7 @@ around that:
 | | getting the input | MCU bridge needs |
 |---|---|---|
 | **Linux** | `snd-usb-audio` quirk ([quirk/](quirk/)) | `snd-virmidi` |
-| **Windows** | Digidesign/Avid's own driver | a loopback pair |
+| **Windows** | Digidesign/Avid's own driver, **or the dongle** | a loopback pair |
 | **macOS** | claim the USB interface directly (libusb) | nothing |
 
 macOS is the odd one out in both columns. CoreMIDI has no quirk mechanism, so
@@ -190,9 +190,19 @@ unzip anywhere, no vcredist or DLLs needed):
 cd build && cpack
 ```
 
-The Command|8 needs Digidesign/Avid's own driver on Windows to expose its MIDI
-input and output (`Command|8`, plus `MIDIIN2/3` for the rear MIDI jacks). If
-another app (a DAW) holds the port, close it first: WinMM ports are exclusive.
+On Windows the Command|8 needs either Digidesign/Avid's own driver to expose its
+MIDI input and output (`Command|8`, plus `MIDIIN2/3` for the rear MIDI jacks),
+or the [command8-dongle](https://github.com/alphonsom/command8-dongle), which
+makes the surface enumerate as an ordinary class-compliant USB-MIDI device with
+no driver at all. Either way the ports look the same to this engine.
+
+**If another app holds the port, close it first: WinMM ports are exclusive.**
+In particular, set the Command|8's input *and* output to disabled in a DAW's
+MIDI device list before starting `command8-reaper` or `command8-mackie` --
+otherwise the engine cannot open the device and simply fails to start. The DAW
+talks to the engine (over OSC, or over the MCU loopback pair), never to the
+surface directly: the Command|8 speaks a proprietary protocol, so a DAW sending
+it generic MIDI just makes the faders twitch and leaves the display Offline.
 
 ### Mackie bridge on Windows
 
