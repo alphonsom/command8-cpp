@@ -50,6 +50,13 @@ public:
     void lcd_channel(int strip, const std::string& text);  // bottom row
     void lcd_status(int strip, const std::string& text);   // top row
 
+    // Pass device-ready bytes straight through. For back-ends that do their own
+    // encoding -- specifically MackieBackend, which delegates to the shared C
+    // translator in src/mcu/. That module already emits Command|8 wire format,
+    // so re-deriving it through the calls above would mean decoding its output
+    // only to encode it again. Everything else should use the named methods.
+    void raw(const uint8_t* bytes, size_t n);
+
 private:
     // Level after decay since the last advance. Caller holds meter_mutex_.
     double decayed_locked(int strip, std::chrono::steady_clock::time_point now);

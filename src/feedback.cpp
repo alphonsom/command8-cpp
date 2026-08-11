@@ -111,4 +111,8 @@ void Feedback::lcd_status(int strip, const std::string& text) {
     s_.send(command8::lcd_status(static_cast<uint8_t>(strip), text));
 }
 
+void Feedback::raw(const uint8_t* bytes, size_t n) {
+    s_.send(std::vector<uint8_t>(bytes, bytes + n));
+}
+
 }  // namespace command8
