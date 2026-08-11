@@ -204,6 +204,23 @@ talks to the engine (over OSC, or over the MCU loopback pair), never to the
 surface directly: the Command|8 speaks a proprietary protocol, so a DAW sending
 it generic MIDI just makes the faders twitch and leaves the display Offline.
 
+### No bridge at all: the dongle's MCU cable
+
+A dongle built with on-board translation exposes a fourth cable that *is* a
+Mackie Control endpoint, so none of the above is needed — no engine process, no
+loopback pair, no OSC. Point the DAW's Mackie Control support straight at it,
+input and output, and leave the surface's own port disabled.
+
+The cable is named `Command8 MCU` on Linux and macOS. On Windows, WinMM names
+cables positionally and ignores the jack strings, so it appears as
+`MIDIIN4 (Command|8 Bridge)` / `MIDIOUT4 (Command|8 Bridge)` — the fourth port.
+
+Verified on hardware 2026-08-11: Reaper driving a Command|8 through the dongle
+on Windows with no host software running.
+
+The translation is the same `src/mcu/c8_mcu.c` this repo unit-tests on the
+desktop; the firmware compiles that file directly rather than a copy.
+
 ### Mackie bridge on Windows
 
 Windows has no app-created virtual MIDI ports, so create a loopback pair once
@@ -211,12 +228,20 @@ with [Windows MIDI Services](https://aka.ms/midi) (or two loopMIDI cables and
 `--mcu-recv`/`--mcu-send`):
 
 ```bat
-midi loopback create --name-a "Command8 MCU A" --name-b "Command8 MCU B"
+midi loopback create --name-a "Command8 MCU Bridge" --name-b "Command8 MCU DAW"
 ```
 
-`command8-mackie` uses side **A** by default; point the DAW's Mackie Control
-input *and* output at side **B**. The pair is crossed, so neither end hears its
-own output.
+The ends are named for who owns them. `command8-mackie` takes **Command8 MCU
+Bridge** by default; point the DAW's Mackie Control input *and* output at
+**Command8 MCU DAW**. The pair is crossed, so neither end hears its own output.
+
+Note there is no bar in these names, deliberately. `Command|8` is how the tools
+find the surface itself, by prefix, so a loopback named `Command|8 MCU …` could
+be matched as the device. Keep the loopback pair on the unbarred `Command8`.
+
+Verified end to end on Windows: with the three `Command|8 Bridge` device ports
+left **disabled** in Reaper's MIDI Devices, `Command8 MCU DAW` enabled, and a
+Mackie Control Universal surface pointed at it for both input and output.
 
 
 ## License

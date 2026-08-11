@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 cmake_minimum_required(VERSION 3.16)
-project(command8 LANGUAGES CXX)
+project(command8 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release)
 endif()
@@ -27,6 +29,15 @@ add_library(command8 STATIC
   src/controller.cpp)
 target_include_directories(command8 PUBLIC src)
 target_compile_options(command8 PRIVATE ${C8_WARNINGS})
+
+# Freestanding C99 Command|8 <-> Mackie Control translator, shared verbatim with
+# the dongle firmware, where it runs on bare metal with no allocator and no C++
+# runtime. It is a separate target with no link dependencies on purpose: the
+# build then enforces that property instead of leaving it to convention, so an
+# accidental #include of a host header fails here rather than on the RP2040.
+add_library(command8-mcu STATIC src/mcu/c8_mcu.c)
+target_include_directories(command8-mcu PUBLIC src)
+target_compile_options(command8-mcu PRIVATE ${C8_WARNINGS})
 
 if(WIN32)
   find_package(RtMidi CONFIG REQUIRED)
@@ -161,6 +172,11 @@ add_executable(test_protocol tests/test_protocol.cpp)
 target_link_libraries(test_protocol PRIVATE command8)
 target_compile_options(test_protocol PRIVATE ${C8_WARNINGS})
 add_test(NAME protocol COMMAND test_protocol)
+
+add_executable(test_mcu tests/test_mcu.cpp)
+target_link_libraries(test_mcu PRIVATE command8 command8-mcu)
+target_compile_options(test_mcu PRIVATE ${C8_WARNINGS})
+add_test(NAME mcu COMMAND test_mcu)
 
 add_executable(test_feedback tests/test_feedback.cpp)
 target_link_libraries(test_feedback PRIVATE command8)
