@@ -1,21 +1,31 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Mackie Control (MCU) emulation backend. Presents the Command|8 to the DAW as
 // a Mackie Control on a MIDI port: on Linux typically a snd-virmidi "Virtual
-// Raw MIDI" kernel port, on Windows a pair of loopMIDI cables. Built on
-// libcommand8 with a MidiPort for the MCU side, so the translation logic is
-// transport-agnostic.
+// Raw MIDI" kernel port, on Windows a Windows MIDI Services loopback pair.
 //
-// Translation ported from the original Python driver's mackie profile.
+// This class owns no translation logic of its own. It is an adapter around
+// src/mcu/c8_mcu.c -- the same freestanding C module the dongle firmware runs,
+// and the one the unit tests cover. Keeping a second copy here would mean the
+// host bridge and the dongle could drift apart silently, each correct against
+// its own tests and different on the wire.
+//
+// The adapter costs one re-encode. Surface decodes device bytes into Events,
+// Controller hands those to the on_* methods below, and they rebuild the
+// original bytes for the C module. That round trip is exact -- every field
+// survives, and a test pins it -- but it is a round trip, and it exists only
+// to keep the Backend abstraction intact. A byte-level path from Surface
+// straight into the translator would be cleaner and is the obvious next
+// refactor; it was not done here because it touches every Surface backend.
 #pragma once
 
-#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <mutex>
-#include <set>
 #include <string>
 
 #include "backend.hpp"
+#include "protocol.hpp"
+#include "mcu/c8_mcu.h"
 #include "midi_port.hpp"
 
 namespace command8 {
@@ -49,6 +59,39 @@ inline constexpr const char* kDefaultMcuRecvMatch = "VirMIDI";
 inline constexpr const char* kDefaultMcuSendMatch = "VirMIDI";
 #endif
 
+// --- Event -> wire bytes ---------------------------------------------------
+//
+// Controller hands back-ends decoded Events, but the translator works in
+// Command|8 wire bytes, so these rebuild what the device originally sent. The
+// round trip must be lossless or control values would shift, so they are inline
+// and free rather than private members: tests/test_mackie_roundtrip.cpp feeds
+// every possible input through decode_* and back and asserts the bytes match.
+
+// Fader: the 10-bit position is split across the CC number (low 3 bits) and its
+// data byte (upper 7), which is how the surface transmits it.
+inline void surface_bytes_for_fader(int strip, double value01, uint8_t out[3]) {
+    int v10 = static_cast<int>(value01 * 1023.0 + 0.5);
+    if (v10 < 0) v10 = 0;
+    if (v10 > 1023) v10 = 1023;
+    out[0] = 0xB0;
+    out[1] = static_cast<uint8_t>(((v10 & 0x07) << 3) | (strip & STRIP_MASK));
+    out[2] = static_cast<uint8_t>((v10 >> 3) & 0x7F);
+}
+
+inline void surface_bytes_for_encoder(int strip, int delta, uint8_t out[3]) {
+    out[0] = 0xB0;
+    out[1] = static_cast<uint8_t>(ENCODER_CC_BASE + (strip & STRIP_MASK));
+    out[2] = delta > 0 ? ENC_RIGHT : ENC_LEFT;
+}
+
+// Buttons: velocity carries the sub-id in the low 6 bits, bit 6 = pressed.
+inline void surface_bytes_for_button(uint8_t note, uint8_t subid, bool pressed,
+                                    uint8_t out[3]) {
+    out[0] = 0x90;
+    out[1] = note;
+    out[2] = static_cast<uint8_t>((pressed ? VEL_ON : 0) | (subid & SUBID_MASK));
+}
+
 class MackieBackend : public Backend {
 public:
     explicit MackieBackend(std::string recv_match = kDefaultMcuRecvMatch,
@@ -67,21 +110,21 @@ public:
     void on_solo(int strip, bool pressed) override;
     void on_button(uint8_t note, uint8_t subid, bool pressed) override;
 
+    // Drives meter ballistics inside the translator (~10 Hz from Controller).
+    void tick() override;
+
 private:
-    void send_note(int note, bool on);
-    void send_cc(int cc, int value);
-    void send_pitch(int channel, int value);
-    void handle_mcu(const std::vector<uint8_t>& m);
-    void lcd_sysex(const uint8_t* data, int len);
-    void set_nav_mode(int mode);   // Bank/Nudge/Zoom radio group
-    void paint_nav_leds();
+    // Rebuild the Command|8 wire bytes an Event came from and hand them to the
+    // translator. See the class comment on why this round trip exists.
+    void feed_surface(uint8_t status, uint8_t d1, uint8_t d2);
 
-    int nav_mode_ = 0;               // 0=Bank,1=Nudge,2=Zoom (input thread only)
+    // Translator output. Static trampolines because the C module takes plain
+    // function pointers; `user` is always `this`.
+    static void to_daw(void* user, const uint8_t* msg, size_t len);
+    static void to_surface(void* user, const uint8_t* msg, size_t len);
+
+    c8_mcu_t mcu_{};
     std::unique_ptr<MidiPort> port_;
-
-    std::mutex state_m_;              // guards selected_
-    std::set<int> selected_;
-    std::array<uint8_t, 112> lcd_{};  // Mackie 2x56 LCD buffer
 };
 
 }  // namespace command8

@@ -163,7 +163,9 @@ endif()
 add_executable(command8-mackie
   src/mackie/mackie_main.cpp
   src/mackie/mackie_backend.cpp)
-target_link_libraries(command8-mackie PRIVATE command8)
+# MackieBackend is an adapter over the shared C translator, not a second copy
+# of it, so the binary links the same module the dongle firmware compiles.
+target_link_libraries(command8-mackie PRIVATE command8 command8-mcu)
 target_compile_options(command8-mackie PRIVATE ${C8_WARNINGS})
 
 # --- tests (CTest) ---
@@ -172,6 +174,14 @@ add_executable(test_protocol tests/test_protocol.cpp)
 target_link_libraries(test_protocol PRIVATE command8)
 target_compile_options(test_protocol PRIVATE ${C8_WARNINGS})
 add_test(NAME protocol COMMAND test_protocol)
+
+# Pins the Event -> wire-byte round trip MackieBackend performs. Header-only
+# helpers, so this does not need mackie_backend.cpp (which lives in the
+# executable, not the library).
+add_executable(test_mackie_roundtrip tests/test_mackie_roundtrip.cpp)
+target_link_libraries(test_mackie_roundtrip PRIVATE command8 command8-mcu)
+target_compile_options(test_mackie_roundtrip PRIVATE ${C8_WARNINGS})
+add_test(NAME mackie_roundtrip COMMAND test_mackie_roundtrip)
 
 add_executable(test_mcu tests/test_mcu.cpp)
 target_link_libraries(test_mcu PRIVATE command8 command8-mcu)
